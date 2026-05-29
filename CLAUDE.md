@@ -37,3 +37,14 @@ After editing:
 1. Summarize changed files.
 2. Explain how to test in Godot.
 3. Mention any risks or follow-up cleanup.
+
+## Required Context Order
+
+Before coding, read:
+
+1. `docs/design_north_star.md`
+2. `docs/phase_1a_brief.md`
+
+The full GDD is available in `docs/`, but it is reference material, not implementation permission.
+
+Do not implement future systems just because they are mentioned in the GDD. If a task appears to require raiders, combat, AI, trade, specialists, gods, diplomacy, tactical battles, or procedural generation, stop and ask for confirmation.
