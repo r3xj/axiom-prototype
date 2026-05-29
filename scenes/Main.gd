@@ -20,11 +20,10 @@ var hearthmere: Dictionary = {
 
 var supply_production_labor_teams: int = 0
 
-var selected_region_label: Label
 var time_label: Label
-var economy_body: Label
 var info_title: Label
 var info_body: Label
+var economy_body: Label
 var supply_minus_button: Button
 var supply_plus_button: Button
 
@@ -177,58 +176,72 @@ func _build_ui() -> void:
 	var root_layout := VBoxContainer.new()
 	root_layout.name = "RootLayout"
 	root_layout.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root_layout.add_theme_constant_override("separation", 10)
+	root_layout.add_theme_constant_override("separation", 8)
 	add_child(root_layout)
 
+	_build_top_bar(root_layout)
+	_build_body(root_layout)
+
+
+func _build_top_bar(parent: Control) -> void:
 	var top_bar := PanelContainer.new()
 	top_bar.name = "TopBar"
-	root_layout.add_child(top_bar)
+	top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(top_bar)
 
 	var top_bar_content := HBoxContainer.new()
 	top_bar_content.name = "TopBarContent"
-	top_bar_content.add_theme_constant_override("separation", 12)
+	top_bar_content.add_theme_constant_override("separation", 8)
 	top_bar.add_child(top_bar_content)
 
 	var title := Label.new()
 	title.text = "AXIOM Prototype — Phase 1A"
-	title.custom_minimum_size = Vector2(260, 0)
+	title.custom_minimum_size = Vector2(230, 0)
 	top_bar_content.add_child(title)
 
 	time_label = Label.new()
-	time_label.custom_minimum_size = Vector2(180, 0)
+	time_label.custom_minimum_size = Vector2(140, 0)
 	top_bar_content.add_child(time_label)
 
 	var advance_1h_button := Button.new()
-	advance_1h_button.text = "Advance 1h"
+	advance_1h_button.text = "+1h"
 	advance_1h_button.pressed.connect(_advance_hours.bind(1))
 	top_bar_content.add_child(advance_1h_button)
 
 	var advance_6h_button := Button.new()
-	advance_6h_button.text = "Advance 6h"
+	advance_6h_button.text = "+6h"
 	advance_6h_button.pressed.connect(_advance_hours.bind(6))
 	top_bar_content.add_child(advance_6h_button)
 
 	var advance_24h_button := Button.new()
-	advance_24h_button.text = "Advance 24h"
+	advance_24h_button.text = "+24h"
 	advance_24h_button.pressed.connect(_advance_hours.bind(24))
 	top_bar_content.add_child(advance_24h_button)
 
+
+func _build_body(parent: Control) -> void:
 	var body_layout := HBoxContainer.new()
 	body_layout.name = "BodyLayout"
+	body_layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body_layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body_layout.add_theme_constant_override("separation", 16)
-	root_layout.add_child(body_layout)
+	body_layout.add_theme_constant_override("separation", 8)
+	parent.add_child(body_layout)
 
+	_build_map_panel(body_layout)
+	_build_side_panel(body_layout)
+
+
+func _build_map_panel(parent: Control) -> void:
 	var map_panel := PanelContainer.new()
 	map_panel.name = "MapPanel"
-	map_panel.custom_minimum_size = Vector2(720, 640)
+	map_panel.custom_minimum_size = Vector2(420, 0)
 	map_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body_layout.add_child(map_panel)
+	parent.add_child(map_panel)
 
 	var map_content := VBoxContainer.new()
 	map_content.name = "MapContent"
-	map_content.add_theme_constant_override("separation", 12)
+	map_content.add_theme_constant_override("separation", 8)
 	map_panel.add_child(map_content)
 
 	var map_title := Label.new()
@@ -237,13 +250,14 @@ func _build_ui() -> void:
 	map_content.add_child(map_title)
 
 	var subtitle := Label.new()
-	subtitle.text = "Click a region to inspect it. Phase 1A is currently non-combat."
+	subtitle.text = "Click a region to inspect it. Phase 1A is non-combat."
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	map_content.add_child(subtitle)
 
 	var map_grid := GridContainer.new()
 	map_grid.name = "RegionButtonGrid"
-	map_grid.columns = 3
+	map_grid.columns = 2
 	map_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_content.add_child(map_grid)
@@ -251,7 +265,7 @@ func _build_ui() -> void:
 	for region_id in region_order:
 		var button := Button.new()
 		button.text = regions[region_id]["name"]
-		button.custom_minimum_size = Vector2(220, 84)
+		button.custom_minimum_size = Vector2(180, 64)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		button.pressed.connect(_select_region.bind(region_id))
@@ -263,21 +277,34 @@ func _build_ui() -> void:
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	map_content.add_child(note)
 
+
+func _build_side_panel(parent: Control) -> void:
+	var side_scroll := ScrollContainer.new()
+	side_scroll.name = "SideScroll"
+	side_scroll.custom_minimum_size = Vector2(360, 0)
+	side_scroll.size_flags_horizontal = Control.SIZE_FILL
+	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(side_scroll)
+
 	var side_panel := VBoxContainer.new()
 	side_panel.name = "SidePanel"
-	side_panel.custom_minimum_size = Vector2(460, 640)
-	side_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	side_panel.add_theme_constant_override("separation", 12)
-	body_layout.add_child(side_panel)
+	side_panel.custom_minimum_size = Vector2(340, 0)
+	side_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	side_panel.add_theme_constant_override("separation", 8)
+	side_scroll.add_child(side_panel)
 
+	_build_region_info_panel(side_panel)
+	_build_economy_panel(side_panel)
+
+
+func _build_region_info_panel(parent: Control) -> void:
 	var info_panel := PanelContainer.new()
 	info_panel.name = "InfoPanel"
-	info_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	side_panel.add_child(info_panel)
+	parent.add_child(info_panel)
 
 	var info_content := VBoxContainer.new()
 	info_content.name = "InfoContent"
-	info_content.add_theme_constant_override("separation", 10)
+	info_content.add_theme_constant_override("separation", 8)
 	info_panel.add_child(info_content)
 
 	info_title = Label.new()
@@ -288,12 +315,13 @@ func _build_ui() -> void:
 	info_body = Label.new()
 	info_body.text = ""
 	info_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	info_content.add_child(info_body)
 
+
+func _build_economy_panel(parent: Control) -> void:
 	var economy_panel := PanelContainer.new()
 	economy_panel.name = "EconomyPanel"
-	side_panel.add_child(economy_panel)
+	parent.add_child(economy_panel)
 
 	var economy_content := VBoxContainer.new()
 	economy_content.name = "EconomyContent"
