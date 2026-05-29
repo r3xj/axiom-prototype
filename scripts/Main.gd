@@ -21,6 +21,22 @@ var hearthmere: Dictionary = {
 var supply_production_labor_teams: int = 0
 var active_projects: Array[Dictionary] = []
 var event_log: Array[String] = []
+var redglass_known: bool = false
+
+var material_codex: Dictionary = {
+	"redglass_ore": {
+		"name": "Redglass Ore",
+		"status": "Undiscovered",
+		"known_source": "Unknown",
+		"observed_traits": [],
+		"tested_properties": [],
+		"known_uses": [],
+		"field_notes": [],
+		"unresolved_questions": [],
+	}
+}
+
+var codex_body: Label
 
 var prospects: Dictionary = {
 	"red_seam": {
@@ -334,6 +350,7 @@ func _build_side_panel(parent: Control) -> void:
 
 	_build_region_info_panel(side_panel)
 	_build_prospects_panel(side_panel)
+	_build_codex_panel(side_panel)
 	_build_economy_panel(side_panel)
 	_build_projects_panel(side_panel)
 	_build_event_log_panel(side_panel)
@@ -463,6 +480,25 @@ func _build_event_log_panel(parent: Control) -> void:
 	event_log_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	event_content.add_child(event_log_body)
 
+func _build_codex_panel(parent: Control) -> void:
+	var codex_panel := PanelContainer.new()
+	codex_panel.name = "MaterialCodexPanel"
+	parent.add_child(codex_panel)
+
+	var codex_content := VBoxContainer.new()
+	codex_content.name = "MaterialCodexContent"
+	codex_content.add_theme_constant_override("separation", 8)
+	codex_panel.add_child(codex_content)
+
+	var codex_title := Label.new()
+	codex_title.text = "Material Codex"
+	codex_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	codex_content.add_child(codex_title)
+
+	codex_body = Label.new()
+	codex_body.text = ""
+	codex_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	codex_content.add_child(codex_body)
 
 func _select_region(region_id: String) -> void:
 	selected_region_id = region_id
@@ -477,6 +513,7 @@ func _refresh_all_ui() -> void:
 	_refresh_economy_panel()
 	_refresh_projects_panel()
 	_refresh_event_log_panel()
+	_refresh_codex_panel()
 
 
 func _refresh_time_label() -> void:
@@ -623,6 +660,38 @@ func _refresh_event_log_panel() -> void:
 
 	event_log_body.text = text.strip_edges()
 
+func _refresh_codex_panel() -> void:
+	if not redglass_known:
+		codex_body.text = "No material entries discovered yet."
+		return
+
+	var redglass: Dictionary = material_codex["redglass_ore"]
+
+	var observed_text: String = _format_string_list(redglass["observed_traits"])
+	var tested_text: String = _format_string_list(redglass["tested_properties"])
+	var use_text: String = _format_string_list(redglass["known_uses"])
+	var field_note_text: String = _format_string_list(redglass["field_notes"])
+	var unresolved_text: String = _format_string_list(redglass["unresolved_questions"])
+
+	codex_body.text = (
+		"%s\n"
+		+ "Status: %s\n"
+		+ "Known Source: %s\n\n"
+		+ "Observed Traits:\n%s\n\n"
+		+ "Tested Properties:\n%s\n\n"
+		+ "Known Uses:\n%s\n\n"
+		+ "Field Notes:\n%s\n\n"
+		+ "Unresolved Questions:\n%s"
+	) % [
+		str(redglass["name"]),
+		str(redglass["status"]),
+		str(redglass["known_source"]),
+		observed_text,
+		tested_text,
+		use_text,
+		field_note_text,
+		unresolved_text,
+	]
 
 func _advance_hours(hours: int) -> void:
 	for i in range(hours):
@@ -710,7 +779,9 @@ func _complete_survey_project(prospect_id: String) -> void:
 	if prospect["outcome"] == "redglass_deposit":
 		redglass_deposit_confirmed = true
 		regions["redglass_foothills"]["status"] = "Known / Redglass Deposit Confirmed"
-		_add_event("Deposit confirmed: %s." % prospect["name"])
+		_discover_redglass_ore()
+		_add_event("Deposit confirmed: %s." % str(prospect["name"]))
+		_add_event("Material Codex updated: Redglass Ore.")
 	else:
 		_add_event("Survey complete: %s." % prospect["name"])
 
@@ -797,3 +868,41 @@ func _clear_container_children(container: Node) -> void:
 	for child in container.get_children():
 		container.remove_child(child)
 		child.queue_free()
+
+func _format_string_list(items_variant: Variant) -> String:
+	var items: Array = items_variant as Array
+
+	if items.is_empty():
+		return "- None"
+
+	var text: String = ""
+	for item in items:
+		text += "- %s\n" % str(item)
+
+	return text.strip_edges()
+
+func _discover_redglass_ore() -> void:
+	redglass_known = true
+
+	material_codex["redglass_ore"] = {
+		"name": "Redglass Ore",
+		"status": "Known / Untested",
+		"known_source": "Redglass Foothills",
+		"observed_traits": [
+			"Red, glassy mineral seam",
+			"Local workers do not recognize it",
+			"Surface samples are stable enough to transport",
+		],
+		"tested_properties": [],
+		"known_uses": [
+			"Unknown",
+		],
+		"field_notes": [],
+		"unresolved_questions": [
+			"Weapon suitability unknown",
+			"Armor/shield suitability unknown",
+			"Thermal response unknown",
+			"Workability unknown",
+			"Value/appeal unknown",
+		],
+	}
