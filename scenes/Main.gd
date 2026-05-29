@@ -1,6 +1,34 @@
 extends Control
 
+const HOURS_PER_DAY: int = 24
+
 var selected_region_id: String = "hearthmere"
+var game_hour: int = 8
+
+var hearthmere: Dictionary = {
+	"population": 240,
+	"available_workforce": 120,
+	"labor_team_size": 20,
+	"mobilized_manpower": 0,
+	"recovering": 0,
+	"recent_losses": 0,
+	"supplies": 60.0,
+	"supply_cap": 100.0,
+	"supply_production_per_team_per_day": 12.0,
+	"settlement_defense": 12,
+}
+
+var supply_production_labor_teams: int = 0
+
+var selected_region_label: Label
+var time_label: Label
+var economy_body: Label
+var info_title: Label
+var info_body: Label
+var supply_minus_button: Button
+var supply_plus_button: Button
+
+var region_buttons: Dictionary = {}
 
 var region_order: Array[String] = [
 	"silent_border",
@@ -30,9 +58,9 @@ var regions: Dictionary = {
 		"available_actions": [
 			"Inspect population and labor",
 			"Inspect stockpiles",
-			"Start supply production",
-			"Start testing / analysis project",
-			"Start forge output project",
+			"Assign labor to supply production",
+			"Start testing / analysis project later",
+			"Start forge output project later",
 		],
 	},
 	"redglass_foothills": {
@@ -47,10 +75,10 @@ var regions: Dictionary = {
 			"Potential future extraction site",
 		],
 		"available_actions": [
-			"Inspect prospect leads",
-			"Begin survey project",
-			"Claim confirmed deposit",
-			"Establish mine after claim",
+			"Inspect prospect leads later",
+			"Begin survey project later",
+			"Claim confirmed deposit later",
+			"Establish mine after claim later",
 		],
 	},
 	"ashen_pass": {
@@ -130,16 +158,11 @@ var regions: Dictionary = {
 	},
 }
 
-var region_buttons: Dictionary = {}
-
-var info_title: Label
-var info_body: Label
-
 
 func _ready() -> void:
 	_clear_existing_children()
 	_build_ui()
-	_select_region(selected_region_id)
+	_refresh_all_ui()
 
 
 func _clear_existing_children() -> void:
@@ -149,31 +172,72 @@ func _clear_existing_children() -> void:
 
 
 func _build_ui() -> void:
-	var root_layout := HBoxContainer.new()
+	region_buttons.clear()
+
+	var root_layout := VBoxContainer.new()
 	root_layout.name = "RootLayout"
 	root_layout.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root_layout.add_theme_constant_override("separation", 16)
+	root_layout.add_theme_constant_override("separation", 10)
 	add_child(root_layout)
+
+	var top_bar := PanelContainer.new()
+	top_bar.name = "TopBar"
+	root_layout.add_child(top_bar)
+
+	var top_bar_content := HBoxContainer.new()
+	top_bar_content.name = "TopBarContent"
+	top_bar_content.add_theme_constant_override("separation", 12)
+	top_bar.add_child(top_bar_content)
+
+	var title := Label.new()
+	title.text = "AXIOM Prototype — Phase 1A"
+	title.custom_minimum_size = Vector2(260, 0)
+	top_bar_content.add_child(title)
+
+	time_label = Label.new()
+	time_label.custom_minimum_size = Vector2(180, 0)
+	top_bar_content.add_child(time_label)
+
+	var advance_1h_button := Button.new()
+	advance_1h_button.text = "Advance 1h"
+	advance_1h_button.pressed.connect(_advance_hours.bind(1))
+	top_bar_content.add_child(advance_1h_button)
+
+	var advance_6h_button := Button.new()
+	advance_6h_button.text = "Advance 6h"
+	advance_6h_button.pressed.connect(_advance_hours.bind(6))
+	top_bar_content.add_child(advance_6h_button)
+
+	var advance_24h_button := Button.new()
+	advance_24h_button.text = "Advance 24h"
+	advance_24h_button.pressed.connect(_advance_hours.bind(24))
+	top_bar_content.add_child(advance_24h_button)
+
+	var body_layout := HBoxContainer.new()
+	body_layout.name = "BodyLayout"
+	body_layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body_layout.add_theme_constant_override("separation", 16)
+	root_layout.add_child(body_layout)
 
 	var map_panel := PanelContainer.new()
 	map_panel.name = "MapPanel"
-	map_panel.custom_minimum_size = Vector2(760, 640)
+	map_panel.custom_minimum_size = Vector2(720, 640)
 	map_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root_layout.add_child(map_panel)
+	body_layout.add_child(map_panel)
 
 	var map_content := VBoxContainer.new()
 	map_content.name = "MapContent"
 	map_content.add_theme_constant_override("separation", 12)
 	map_panel.add_child(map_content)
 
-	var title := Label.new()
-	title.text = "AXIOM Prototype — Phase 1A"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	map_content.add_child(title)
+	var map_title := Label.new()
+	map_title.text = "Known Local Region"
+	map_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	map_content.add_child(map_title)
 
 	var subtitle := Label.new()
-	subtitle.text = "Hardcoded region-node map. Click a region to inspect it."
+	subtitle.text = "Click a region to inspect it. Phase 1A is currently non-combat."
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	map_content.add_child(subtitle)
 
@@ -199,11 +263,17 @@ func _build_ui() -> void:
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	map_content.add_child(note)
 
+	var side_panel := VBoxContainer.new()
+	side_panel.name = "SidePanel"
+	side_panel.custom_minimum_size = Vector2(460, 640)
+	side_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	side_panel.add_theme_constant_override("separation", 12)
+	body_layout.add_child(side_panel)
+
 	var info_panel := PanelContainer.new()
 	info_panel.name = "InfoPanel"
-	info_panel.custom_minimum_size = Vector2(420, 640)
 	info_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root_layout.add_child(info_panel)
+	side_panel.add_child(info_panel)
 
 	var info_content := VBoxContainer.new()
 	info_content.name = "InfoContent"
@@ -221,14 +291,60 @@ func _build_ui() -> void:
 	info_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	info_content.add_child(info_body)
 
+	var economy_panel := PanelContainer.new()
+	economy_panel.name = "EconomyPanel"
+	side_panel.add_child(economy_panel)
+
+	var economy_content := VBoxContainer.new()
+	economy_content.name = "EconomyContent"
+	economy_content.add_theme_constant_override("separation", 8)
+	economy_panel.add_child(economy_content)
+
+	var economy_title := Label.new()
+	economy_title.text = "Hearthmere Economy"
+	economy_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	economy_content.add_child(economy_title)
+
+	economy_body = Label.new()
+	economy_body.text = ""
+	economy_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	economy_content.add_child(economy_body)
+
+	var labor_controls := HBoxContainer.new()
+	labor_controls.name = "SupplyLaborControls"
+	labor_controls.add_theme_constant_override("separation", 8)
+	economy_content.add_child(labor_controls)
+
+	supply_minus_button = Button.new()
+	supply_minus_button.text = "- Supply Labor"
+	supply_minus_button.pressed.connect(_change_supply_labor.bind(-1))
+	labor_controls.add_child(supply_minus_button)
+
+	supply_plus_button = Button.new()
+	supply_plus_button.text = "+ Supply Labor"
+	supply_plus_button.pressed.connect(_change_supply_labor.bind(1))
+	labor_controls.add_child(supply_plus_button)
+
 
 func _select_region(region_id: String) -> void:
 	selected_region_id = region_id
+	_refresh_region_panel()
+	_refresh_region_buttons()
 
-	for key in region_buttons.keys():
-		region_buttons[key].disabled = key == region_id
 
-	var region: Dictionary = regions[region_id]
+func _refresh_all_ui() -> void:
+	_refresh_time_label()
+	_refresh_region_panel()
+	_refresh_region_buttons()
+	_refresh_economy_panel()
+
+
+func _refresh_time_label() -> void:
+	time_label.text = "Day %d — %02d:00" % [_get_day_number(), _get_hour_of_day()]
+
+
+func _refresh_region_panel() -> void:
+	var region: Dictionary = regions[selected_region_id]
 
 	info_title.text = region["name"]
 
@@ -255,3 +371,107 @@ func _select_region(region_id: String) -> void:
 		known_text,
 		action_text,
 	]
+
+
+func _refresh_region_buttons() -> void:
+	for key in region_buttons.keys():
+		region_buttons[key].disabled = key == selected_region_id
+
+
+func _refresh_economy_panel() -> void:
+	var total_labor_teams := _get_total_labor_teams()
+	var unassigned_labor_teams := _get_unassigned_labor_teams()
+	var daily_supply_output := supply_production_labor_teams * float(hearthmere["supply_production_per_team_per_day"])
+
+	economy_body.text = (
+		"Population: %d\n"
+		+ "Available Workforce: %d\n"
+		+ "Labor Team Size: %d workers\n"
+		+ "Total Labor Teams: %d\n"
+		+ "Unassigned Labor Teams: %d\n"
+		+ "Supply Production Labor: %d\n"
+		+ "Supply Output: %.1f / day\n\n"
+		+ "Supplies: %.1f / %.1f\n"
+		+ "Mobilized Manpower: %d\n"
+		+ "Recovering: %d\n"
+		+ "Recent Losses: %d\n"
+		+ "Settlement Defense: %d, immobile"
+	) % [
+		int(hearthmere["population"]),
+		int(hearthmere["available_workforce"]),
+		int(hearthmere["labor_team_size"]),
+		total_labor_teams,
+		unassigned_labor_teams,
+		supply_production_labor_teams,
+		daily_supply_output,
+		float(hearthmere["supplies"]),
+		float(hearthmere["supply_cap"]),
+		int(hearthmere["mobilized_manpower"]),
+		int(hearthmere["recovering"]),
+		int(hearthmere["recent_losses"]),
+		int(hearthmere["settlement_defense"]),
+	]
+
+	supply_minus_button.disabled = supply_production_labor_teams <= 0
+	supply_plus_button.disabled = unassigned_labor_teams <= 0
+
+
+func _advance_hours(hours: int) -> void:
+	for i in range(hours):
+		game_hour += 1
+		_run_hourly_simulation_tick()
+
+	_refresh_all_ui()
+
+
+func _run_hourly_simulation_tick() -> void:
+	_produce_supplies_for_one_hour()
+
+
+func _produce_supplies_for_one_hour() -> void:
+	if supply_production_labor_teams <= 0:
+		return
+
+	var daily_output := supply_production_labor_teams * float(hearthmere["supply_production_per_team_per_day"])
+	var hourly_output := daily_output / float(HOURS_PER_DAY)
+	var new_supply_total := float(hearthmere["supplies"]) + hourly_output
+
+	hearthmere["supplies"] = min(new_supply_total, float(hearthmere["supply_cap"]))
+
+
+func _change_supply_labor(delta: int) -> void:
+	if delta > 0 and _get_unassigned_labor_teams() <= 0:
+		return
+
+	if delta < 0 and supply_production_labor_teams <= 0:
+		return
+
+	supply_production_labor_teams = clamp(
+		supply_production_labor_teams + delta,
+		0,
+		_get_total_labor_teams()
+	)
+
+	_refresh_all_ui()
+
+
+func _get_total_labor_teams() -> int:
+	var available_workforce := int(hearthmere["available_workforce"])
+	var labor_team_size := int(hearthmere["labor_team_size"])
+
+	if labor_team_size <= 0:
+		return 0
+
+	return int(floor(float(available_workforce) / float(labor_team_size)))
+
+
+func _get_unassigned_labor_teams() -> int:
+	return max(0, _get_total_labor_teams() - supply_production_labor_teams)
+
+
+func _get_day_number() -> int:
+	return int(floor(float(game_hour) / float(HOURS_PER_DAY))) + 1
+
+
+func _get_hour_of_day() -> int:
+	return game_hour % HOURS_PER_DAY
