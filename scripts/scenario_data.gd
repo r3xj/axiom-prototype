@@ -7,9 +7,12 @@ const HEARTHMERE_STARTING_VALUES: Dictionary = {
 	"mobilized_manpower": 0,
 	"recovering": 0,
 	"recent_losses": 0,
-	"supplies": 60.0,
-	"supply_cap": 100.0,
 	"supply_production_per_team_per_day": 12.0,
+	"stockpile": {
+		"goods": {
+			"supplies": {"amount": 60.0, "cap": 100.0},
+		}
+	},
 	"settlement_defense": 12,
 }
 
@@ -58,6 +61,7 @@ const PROSPECTS: Dictionary = {
 		"visible_clue": "A thin red mineral line is visible in exposed foothill stone. Local workers do not recognize it.",
 		"outcome": "redglass_deposit",
 		"result_text": "Surveyors confirm a workable deposit of unfamiliar red, glassy ore.",
+		"produces": "redglass_ore",
 	},
 	"dark_gravel": {
 		"name": "Dark Gravel Wash",
