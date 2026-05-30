@@ -8,6 +8,16 @@
 
 config_version=5
 
+[autoload]
+
+SimClock="*res://scripts/autoload/sim_clock.gd"
+EventBus="*res://scripts/autoload/event_bus.gd"
+StockpileSystem="*res://scripts/autoload/stockpile_system.gd"
+GameState="*res://scripts/autoload/game_state.gd"
+CodexSystem="*res://scripts/autoload/codex_system.gd"
+ProjectSystem="*res://scripts/autoload/project_system.gd"
+LogisticsSystem="*res://scripts/autoload/logistics_system.gd"
+
 [application]
 
 config/name="Axiom Prototype"

@@ -1,39 +1,9 @@
 extends Control
 
-const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
-const HOURS_PER_DAY: int = 24
 const DEBUG_MODE: bool = true
 
-const ROUTES: Dictionary = {
-	"ashen_pass": {
-		"name": "Ashen Pass",
-		"travel_hours": 24,
-	},
-	"old_pine_road": {
-		"name": "Old Pine Road",
-		"travel_hours": 36,
-	},
-}
-const SHIPMENT_SUPPLY_AMOUNT: float = 20.0
-
 var selected_region_id: String = "hearthmere"
-var game_hour: int = 8
-
-var hearthmere: Dictionary = ScenarioData.get_hearthmere_starting_values()
-
-var supply_production_labor_teams: int = 0
-var active_projects: Array[Dictionary] = []
-var active_shipments: Array[Dictionary] = []
-var event_log: Array[String] = []
-var redglass_known: bool = false
-
-var material_codex: Dictionary = ScenarioData.get_material_codex_defaults()
-
-var codex_body: Label
-
-var prospects: Dictionary = ScenarioData.get_prospects()
-
-var redglass_deposit_confirmed: bool = false
+var _suppress_refresh: bool = false
 
 var time_label: Label
 var info_title: Label
@@ -46,17 +16,31 @@ var shipments_body: Label
 var event_log_body: Label
 var supply_minus_button: Button
 var supply_plus_button: Button
+var codex_body: Label
 
 var region_buttons: Dictionary = {}
-
-var region_order: Array[String] = ScenarioData.get_region_order()
-var regions: Dictionary = ScenarioData.get_regions()
 
 
 func _ready() -> void:
 	_clear_existing_children()
 	_build_ui()
-	_add_event("Scenario started. Hearthmere surveys its known surroundings.")
+
+	GameState.state_changed.connect(_on_state_changed)
+	ProjectSystem.state_changed.connect(_on_state_changed)
+	LogisticsSystem.state_changed.connect(_on_state_changed)
+	CodexSystem.state_changed.connect(_on_state_changed)
+	SimClock.hours_advanced.connect(_on_hours_advanced)
+
+	EventBus.add_event("Scenario started. Hearthmere surveys its known surroundings.")
+	_refresh_all_ui()
+
+
+func _on_state_changed() -> void:
+	if not _suppress_refresh:
+		_refresh_all_ui()
+
+
+func _on_hours_advanced() -> void:
 	_refresh_all_ui()
 
 
@@ -158,9 +142,9 @@ func _build_map_panel(parent: Control) -> void:
 	map_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_content.add_child(map_grid)
 
-	for region_id in region_order:
+	for region_id in GameState.region_order:
 		var button := Button.new()
-		button.text = regions[region_id]["name"]
+		button.text = GameState.regions[region_id]["name"]
 		button.custom_minimum_size = Vector2(180, 64)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -346,6 +330,7 @@ func _build_event_log_panel(parent: Control) -> void:
 	event_log_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	event_content.add_child(event_log_body)
 
+
 func _build_codex_panel(parent: Control) -> void:
 	var codex_panel := PanelContainer.new()
 	codex_panel.name = "MaterialCodexPanel"
@@ -366,9 +351,37 @@ func _build_codex_panel(parent: Control) -> void:
 	codex_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	codex_content.add_child(codex_body)
 
+
 func _select_region(region_id: String) -> void:
 	selected_region_id = region_id
 	_refresh_all_ui()
+
+
+func _advance_hours(hours: int) -> void:
+	_suppress_refresh = true
+	SimClock.advance_hours(hours)
+	_suppress_refresh = false
+
+
+func _change_supply_labor(delta: int) -> void:
+	if delta > 0 and _get_unassigned_labor_teams() <= 0:
+		return
+	if delta < 0 and GameState.supply_production_labor_teams <= 0:
+		return
+	var new_val: int = clampi(
+		GameState.supply_production_labor_teams + delta,
+		0,
+		GameState.get_total_labor_teams()
+	)
+	GameState.set_supply_labor(new_val)
+
+
+func _get_unassigned_labor_teams() -> int:
+	var assigned: int = (GameState.supply_production_labor_teams
+		+ ProjectSystem.get_project_labor_teams()
+		+ LogisticsSystem.get_shipment_labor_teams()
+		+ GameState.get_mine_worker_teams())
+	return max(0, GameState.get_total_labor_teams() - assigned)
 
 
 func _refresh_all_ui() -> void:
@@ -384,11 +397,11 @@ func _refresh_all_ui() -> void:
 
 
 func _refresh_time_label() -> void:
-	time_label.text = "Day %d — %02d:00" % [_get_day_number(), _get_hour_of_day()]
+	time_label.text = "Day %d — %02d:00" % [SimClock.get_day_number(), SimClock.get_hour_of_day()]
 
 
 func _refresh_region_panel() -> void:
-	var region: Dictionary = regions[selected_region_id]
+	var region: Dictionary = GameState.regions[selected_region_id]
 
 	info_title.text = region["name"]
 
@@ -426,8 +439,8 @@ func _refresh_prospects_panel() -> void:
 	_clear_container_children(prospect_buttons_box)
 
 	var matching_prospect_ids: Array[String] = []
-	for prospect_id in prospects.keys():
-		var prospect: Dictionary = prospects[prospect_id]
+	for prospect_id in GameState.prospects.keys():
+		var prospect: Dictionary = GameState.prospects[prospect_id]
 		if prospect["region_id"] == selected_region_id:
 			matching_prospect_ids.append(prospect_id)
 
@@ -437,7 +450,7 @@ func _refresh_prospects_panel() -> void:
 
 	var text := ""
 	for prospect_id in matching_prospect_ids:
-		var prospect: Dictionary = prospects[prospect_id]
+		var prospect: Dictionary = GameState.prospects[prospect_id]
 		var status: String = str(prospect["status"])
 		text += "%s\n" % prospect["name"]
 		text += "Status: %s\n" % _format_prospect_status(status)
@@ -448,14 +461,17 @@ func _refresh_prospects_panel() -> void:
 		elif status == "mine_building":
 			text += "A mine is under construction here.\n"
 		elif status == "mine_operational":
-			text += "This mine is operational. Awaiting supply chain.\n"
+			if prospect.has("mine_production_status"):
+				text += "Production: %s\n" % _format_mine_production_status(str(prospect["mine_production_status"]))
 			if prospect.has("stockpile"):
 				var mine_stockpile: Dictionary = prospect["stockpile"]
 				text += "Mine Stockpile:\n"
 				for good_key in mine_stockpile["goods"].keys():
-					var amount: float = _get_good_amount(mine_stockpile, good_key)
-					var cap: float = _get_good_cap(mine_stockpile, good_key)
-					text += "- %s: %.1f / %.1f\n" % [_format_good_name(good_key), amount, cap]
+					var amount: float = StockpileSystem.get_good_amount(mine_stockpile, good_key)
+					var cap: float = StockpileSystem.get_good_cap(mine_stockpile, good_key)
+					text += "- %s: %.1f / %.1f\n" % [CodexSystem.get_display_name(good_key), amount, cap]
+			if prospect.has("mine_workers"):
+				text += "Workers: %d / 1\n" % int(prospect["mine_workers"])
 
 		text += "\n"
 
@@ -466,47 +482,87 @@ func _refresh_prospects_panel() -> void:
 				_format_hours(int(prospect["survey_hours"])),
 			]
 			button.disabled = _get_unassigned_labor_teams() <= 0
-			button.pressed.connect(_start_survey_project.bind(prospect_id))
+			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
 			var button := Button.new()
 			button.text = "Establish Mine: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
 			button.disabled = _get_unassigned_labor_teams() < 2
-			button.pressed.connect(_start_establish_mine_project.bind(prospect_id))
+			button.pressed.connect(ProjectSystem.start_establish_mine_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "mine_operational":
 			var can_dispatch: bool = (
-				_get_good_amount(hearthmere["stockpile"], "supplies") >= SHIPMENT_SUPPLY_AMOUNT
+				StockpileSystem.get_good_amount(GameState.hearthmere["stockpile"], "supplies") >= LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT
 				and _get_unassigned_labor_teams() >= 1
 			)
 
 			var btn_ashen := Button.new()
 			btn_ashen.text = "Ship Supplies via Ashen Pass (24h, 1 labor, 20 supplies)"
 			btn_ashen.disabled = not can_dispatch
-			btn_ashen.pressed.connect(_start_supply_shipment.bind(prospect_id, "ashen_pass"))
+			btn_ashen.pressed.connect(LogisticsSystem.start_shipment.bind("hearthmere", prospect_id, "ashen_pass", {"supplies": LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT}))
 			prospect_buttons_box.add_child(btn_ashen)
 
 			var btn_pine := Button.new()
 			btn_pine.text = "Ship Supplies via Old Pine Road (36h, 1 labor, 20 supplies)"
 			btn_pine.disabled = not can_dispatch
-			btn_pine.pressed.connect(_start_supply_shipment.bind(prospect_id, "old_pine_road"))
+			btn_pine.pressed.connect(LogisticsSystem.start_shipment.bind("hearthmere", prospect_id, "old_pine_road", {"supplies": LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT}))
 			prospect_buttons_box.add_child(btn_pine)
+
+			if prospect.has("produces") and prospect.has("stockpile"):
+				var produces: String = str(prospect["produces"])
+				var ore_available: float = StockpileSystem.get_good_amount(prospect["stockpile"], produces)
+				var can_ship_ore: bool = (
+					ore_available >= LogisticsSystem.SHIPMENT_ORE_AMOUNT
+					and _get_unassigned_labor_teams() >= 1
+				)
+				var ore_display: String = CodexSystem.get_display_name(produces)
+
+				var btn_ore_ashen := Button.new()
+				btn_ore_ashen.text = "Ship %s via Ashen Pass (24h, 1 labor, 20 ore)" % ore_display
+				btn_ore_ashen.disabled = not can_ship_ore
+				var ore_cargo_a: Dictionary = {}
+				ore_cargo_a[produces] = LogisticsSystem.SHIPMENT_ORE_AMOUNT
+				btn_ore_ashen.pressed.connect(LogisticsSystem.start_shipment.bind(prospect_id, "hearthmere", "ashen_pass", ore_cargo_a))
+				prospect_buttons_box.add_child(btn_ore_ashen)
+
+				var btn_ore_pine := Button.new()
+				btn_ore_pine.text = "Ship %s via Old Pine Road (36h, 1 labor, 20 ore)" % ore_display
+				btn_ore_pine.disabled = not can_ship_ore
+				var ore_cargo_p: Dictionary = {}
+				ore_cargo_p[produces] = LogisticsSystem.SHIPMENT_ORE_AMOUNT
+				btn_ore_pine.pressed.connect(LogisticsSystem.start_shipment.bind(prospect_id, "hearthmere", "old_pine_road", ore_cargo_p))
+				prospect_buttons_box.add_child(btn_ore_pine)
+
+			if prospect.has("mine_workers"):
+				var workers: int = int(prospect["mine_workers"])
+
+				var btn_add_worker := Button.new()
+				btn_add_worker.text = "[+] Assign Worker to Mine"
+				btn_add_worker.disabled = workers >= 1 or _get_unassigned_labor_teams() <= 0
+				btn_add_worker.pressed.connect(_assign_mine_worker.bind(prospect_id))
+				prospect_buttons_box.add_child(btn_add_worker)
+
+				var btn_remove_worker := Button.new()
+				btn_remove_worker.text = "[-] Remove Worker from Mine"
+				btn_remove_worker.disabled = workers <= 0
+				btn_remove_worker.pressed.connect(_remove_mine_worker.bind(prospect_id))
+				prospect_buttons_box.add_child(btn_remove_worker)
 
 	prospects_body.text = text.strip_edges()
 
 
 func _refresh_economy_panel() -> void:
-	var total_labor_teams := _get_total_labor_teams()
-	var project_labor_teams := _get_project_labor_teams()
-	var shipment_labor_teams := _get_shipment_labor_teams()
-	var unassigned_labor_teams := _get_unassigned_labor_teams()
-	var daily_supply_output := supply_production_labor_teams * float(hearthmere["supply_production_per_team_per_day"])
+	var total_labor_teams: int = GameState.get_total_labor_teams()
+	var project_labor_teams: int = ProjectSystem.get_project_labor_teams()
+	var shipment_labor_teams: int = LogisticsSystem.get_shipment_labor_teams()
+	var unassigned_labor_teams: int = _get_unassigned_labor_teams()
+	var daily_supply_output: float = GameState.supply_production_labor_teams * float(GameState.hearthmere["supply_production_per_team_per_day"])
 
 	var stockpile_text := "Hearthmere Stockpile:\n"
-	for good_key in hearthmere["stockpile"]["goods"].keys():
-		var amount: float = _get_good_amount(hearthmere["stockpile"], good_key)
-		var cap: float = _get_good_cap(hearthmere["stockpile"], good_key)
-		stockpile_text += "- %s: %.1f / %.1f\n" % [_format_good_name(good_key), amount, cap]
+	for good_key in GameState.hearthmere["stockpile"]["goods"].keys():
+		var amount: float = StockpileSystem.get_good_amount(GameState.hearthmere["stockpile"], good_key)
+		var cap: float = StockpileSystem.get_good_cap(GameState.hearthmere["stockpile"], good_key)
+		stockpile_text += "- %s: %.1f / %.1f\n" % [CodexSystem.get_display_name(good_key), amount, cap]
 
 	economy_body.text = (
 		"Population: %d\n"
@@ -524,33 +580,33 @@ func _refresh_economy_panel() -> void:
 		+ "Recent Losses: %d\n"
 		+ "Settlement Defense: %d, immobile"
 	) % [
-		int(hearthmere["population"]),
-		int(hearthmere["available_workforce"]),
-		int(hearthmere["labor_team_size"]),
+		int(GameState.hearthmere["population"]),
+		int(GameState.hearthmere["available_workforce"]),
+		int(GameState.hearthmere["labor_team_size"]),
 		total_labor_teams,
-		supply_production_labor_teams,
+		GameState.supply_production_labor_teams,
 		project_labor_teams,
 		shipment_labor_teams,
 		unassigned_labor_teams,
 		daily_supply_output,
 		stockpile_text.strip_edges(),
-		int(hearthmere["mobilized_manpower"]),
-		int(hearthmere["recovering"]),
-		int(hearthmere["recent_losses"]),
-		int(hearthmere["settlement_defense"]),
+		int(GameState.hearthmere["mobilized_manpower"]),
+		int(GameState.hearthmere["recovering"]),
+		int(GameState.hearthmere["recent_losses"]),
+		int(GameState.hearthmere["settlement_defense"]),
 	]
 
-	supply_minus_button.disabled = supply_production_labor_teams <= 0
+	supply_minus_button.disabled = GameState.supply_production_labor_teams <= 0
 	supply_plus_button.disabled = unassigned_labor_teams <= 0
 
 
 func _refresh_projects_panel() -> void:
-	if active_projects.is_empty():
+	if ProjectSystem.active_projects.is_empty():
 		projects_body.text = "No active projects."
 		return
 
 	var text := ""
-	for project in active_projects:
+	for project in ProjectSystem.active_projects:
 		text += "%s\n" % project["title"]
 		text += "Remaining: %s\n" % _format_hours(int(project["remaining_hours"]))
 		text += "Labor: %d team\n\n" % int(project["labor_teams"])
@@ -559,44 +615,45 @@ func _refresh_projects_panel() -> void:
 
 
 func _refresh_shipments_panel() -> void:
-	if active_shipments.is_empty():
+	if LogisticsSystem.active_shipments.is_empty():
 		shipments_body.text = "No active shipments."
 		return
 
 	var text := ""
-	for shipment in active_shipments:
+	for shipment in LogisticsSystem.active_shipments:
 		var destination_id: String = str(shipment["destination"])
 		var route_id: String = str(shipment["route"])
-		text += "Ship Supplies → %s\n" % str(prospects[destination_id]["name"])
+		text += "Ship Supplies → %s\n" % str(GameState.prospects[destination_id]["name"])
 		text += "Status: %s\n" % str(shipment["status"])
-		text += "Route: %s\n" % str(ROUTES[route_id]["name"])
+		text += "Route: %s\n" % str(LogisticsSystem.ROUTES[route_id]["name"])
 		text += "Progress: %dh / %dh\n" % [int(shipment["progress_hours"]), int(shipment["total_hours"])]
 		var cargo: Dictionary = shipment["cargo"]
 		for good_key in cargo.keys():
-			text += "Cargo: %s: %.1f\n" % [_format_good_name(good_key), float(cargo[good_key])]
+			text += "Cargo: %s: %.1f\n" % [CodexSystem.get_display_name(good_key), float(cargo[good_key])]
 		text += "Labor: %d team\n\n" % int(shipment["labor_teams"])
 
 	shipments_body.text = text.strip_edges()
 
 
 func _refresh_event_log_panel() -> void:
-	if event_log.is_empty():
+	var events: Array = EventBus.get_recent_events(8)
+	if events.is_empty():
 		event_log_body.text = "No events yet."
 		return
 
 	var text := ""
-	var max_events: int = mini(event_log.size(), 8)
-	for i in range(max_events):
-		text += "- %s\n" % event_log[i]
+	for event_str in events:
+		text += "- %s\n" % event_str
 
 	event_log_body.text = text.strip_edges()
 
+
 func _refresh_codex_panel() -> void:
-	if not redglass_known:
+	if not CodexSystem.redglass_known:
 		codex_body.text = "No material entries discovered yet."
 		return
 
-	var redglass: Dictionary = material_codex["redglass_ore"]
+	var redglass: Dictionary = CodexSystem.material_codex["redglass_ore"]
 
 	var observed_text: String = _format_string_list(redglass["observed_traits"])
 	var tested_text: String = _format_string_list(redglass["tested_properties"])
@@ -624,240 +681,13 @@ func _refresh_codex_panel() -> void:
 		unresolved_text,
 	]
 
-func _advance_hours(hours: int) -> void:
-	for i in range(hours):
-		game_hour += 1
-		_run_hourly_simulation_tick()
-
-	_refresh_all_ui()
-
-
-func _run_hourly_simulation_tick() -> void:
-	_produce_supplies_for_one_hour()
-	_advance_projects_for_one_hour()
-	_advance_shipments_for_one_hour()
-
-
-func _produce_supplies_for_one_hour() -> void:
-	if supply_production_labor_teams <= 0:
-		return
-
-	var daily_output := supply_production_labor_teams * float(hearthmere["supply_production_per_team_per_day"])
-	var hourly_output := daily_output / float(HOURS_PER_DAY)
-	var current := _get_good_amount(hearthmere["stockpile"], "supplies")
-	_set_good_amount(hearthmere["stockpile"], "supplies", current + hourly_output)
-
-
-func _advance_projects_for_one_hour() -> void:
-	for i in range(active_projects.size() - 1, -1, -1):
-		var project: Dictionary = active_projects[i]
-		var hourly_supply_cost: float = float(project.get("hourly_supply_cost", 0.0))
-
-		if hourly_supply_cost > 0.0:
-			if _get_good_amount(hearthmere["stockpile"], "supplies") < hourly_supply_cost:
-				var last_stall: int = int(project.get("last_stall_log_hour", -999))
-				if game_hour - last_stall >= HOURS_PER_DAY:
-					var prospect_name: String = str(prospects[str(project["target_id"])]["name"])
-					_add_event("Mine construction stalled: %s. Supplies depleted." % prospect_name)
-					project["last_stall_log_hour"] = game_hour
-					active_projects[i] = project
-				continue
-
-			_adjust_good_amount(hearthmere["stockpile"], "supplies", -hourly_supply_cost)
-
-		project["remaining_hours"] = int(project["remaining_hours"]) - 1
-		active_projects[i] = project
-
-		if int(project["remaining_hours"]) <= 0:
-			active_projects.remove_at(i)
-			_complete_project(project)
-
-
-func _start_survey_project(prospect_id: String) -> void:
-	if not prospects.has(prospect_id):
-		return
-
-	if _get_unassigned_labor_teams() <= 0:
-		_add_event("No unassigned labor team is available for survey work.")
-		_refresh_all_ui()
-		return
-
-	var prospect: Dictionary = prospects[prospect_id]
-	if prospect["status"] != "unsurveyed":
-		return
-
-	prospect["status"] = "surveying"
-	prospects[prospect_id] = prospect
-
-	var project: Dictionary = {
-		"id": "survey_%s" % prospect_id,
-		"type": "survey",
-		"target_id": prospect_id,
-		"title": "Survey: %s" % prospect["name"],
-		"remaining_hours": int(prospect["survey_hours"]),
-		"total_hours": int(prospect["survey_hours"]),
-		"labor_teams": 1,
-	}
-	active_projects.append(project)
-
-	_add_event("Survey started: %s." % prospect["name"])
-	_refresh_all_ui()
-
-
-func _complete_project(project: Dictionary) -> void:
-	var project_type: String = str(project["type"])
-
-	if project_type == "survey":
-		_complete_survey_project(str(project["target_id"]))
-	elif project_type == "establish_mine":
-		_complete_establish_mine_project(str(project["target_id"]))
-	else:
-		_add_event("Project completed: %s." % str(project["title"]))
-
-
-func _start_establish_mine_project(prospect_id: String) -> void:
-	if not prospects.has(prospect_id):
-		return
-
-	var prospect: Dictionary = prospects[prospect_id]
-
-	if prospect["status"] != "surveyed":
-		return
-
-	if prospect["outcome"] != "redglass_deposit":
-		return
-
-	if _get_unassigned_labor_teams() < 2:
-		_add_event("Not enough labor available to establish a mine.")
-		_refresh_all_ui()
-		return
-
-	prospect["status"] = "mine_building"
-	prospects[prospect_id] = prospect
-
-	regions["redglass_foothills"]["status"] = "Known / Mine Under Construction"
-
-	var project: Dictionary = {
-		"id": "establish_mine_%s" % prospect_id,
-		"type": "establish_mine",
-		"target_id": prospect_id,
-		"title": "Establish Mine: %s" % prospect["name"],
-		"remaining_hours": 48,
-		"total_hours": 48,
-		"labor_teams": 2,
-		"hourly_supply_cost": 1.0,
-		"supply_source": "hearthmere",
-		"last_stall_log_hour": -999,
-	}
-	active_projects.append(project)
-
-	_add_event("Mine construction started: %s." % prospect["name"])
-	_refresh_all_ui()
-
-
-func _complete_establish_mine_project(prospect_id: String) -> void:
-	if not prospects.has(prospect_id):
-		return
-
-	var prospect: Dictionary = prospects[prospect_id]
-	prospect["status"] = "mine_operational"
-
-	var produces: String = str(prospect["produces"])
-	var mine_goods: Dictionary = {
-		"supplies": {"amount": 0.0, "cap": 30.0},
-	}
-	mine_goods[produces] = {"amount": 0.0, "cap": 50.0}
-	prospect["stockpile"] = {"goods": mine_goods}
-
-	prospects[prospect_id] = prospect
-
-	_add_good_to_stockpile(hearthmere["stockpile"], produces, 50.0)
-
-	regions["redglass_foothills"]["status"] = "Known / Mine Operational"
-
-	_add_event("Mine construction complete: %s. Awaiting supply chain." % str(prospect["name"]))
-	_add_event("Mine stockpile initialized at %s. Awaiting first supply shipment." % str(prospect["name"]))
-
-
-func _complete_survey_project(prospect_id: String) -> void:
-	if not prospects.has(prospect_id):
-		return
-
-	var prospect: Dictionary = prospects[prospect_id]
-	prospect["status"] = "surveyed"
-	prospects[prospect_id] = prospect
-
-	if prospect["outcome"] == "redglass_deposit":
-		redglass_deposit_confirmed = true
-		regions["redglass_foothills"]["status"] = "Known / Redglass Deposit Confirmed"
-		_discover_redglass_ore()
-		_add_event("Deposit confirmed: %s." % str(prospect["name"]))
-		_add_event("Material Codex updated: Redglass Ore.")
-	else:
-		_add_event("Survey complete: %s." % prospect["name"])
-
-	_add_event(prospect["result_text"])
-
-
-func _change_supply_labor(delta: int) -> void:
-	if delta > 0 and _get_unassigned_labor_teams() <= 0:
-		return
-
-	if delta < 0 and supply_production_labor_teams <= 0:
-		return
-
-	supply_production_labor_teams = clamp(
-		supply_production_labor_teams + delta,
-		0,
-		_get_total_labor_teams()
-	)
-
-	_refresh_all_ui()
-
-
-func _get_total_labor_teams() -> int:
-	var available_workforce := int(hearthmere["available_workforce"])
-	var labor_team_size := int(hearthmere["labor_team_size"])
-
-	if labor_team_size <= 0:
-		return 0
-
-	return int(floor(float(available_workforce) / float(labor_team_size)))
-
-
-func _get_project_labor_teams() -> int:
-	var total := 0
-	for project in active_projects:
-		total += int(project["labor_teams"])
-	return total
-
-
-func _get_shipment_labor_teams() -> int:
-	var total := 0
-	for shipment in active_shipments:
-		total += int(shipment["labor_teams"])
-	return total
-
-
-func _get_unassigned_labor_teams() -> int:
-	var assigned := supply_production_labor_teams + _get_project_labor_teams() + _get_shipment_labor_teams()
-	return max(0, _get_total_labor_teams() - assigned)
-
-
-func _get_day_number() -> int:
-	return int(floor(float(game_hour) / float(HOURS_PER_DAY))) + 1
-
-
-func _get_hour_of_day() -> int:
-	return game_hour % HOURS_PER_DAY
-
 
 func _format_hours(hours: int) -> String:
-	if hours < HOURS_PER_DAY:
+	if hours < 24:
 		return "%dh" % hours
 
-	var days := int(floor(float(hours) / float(HOURS_PER_DAY)))
-	var remaining_hours := hours % HOURS_PER_DAY
+	var days := int(floor(float(hours) / 24.0))
+	var remaining_hours := hours % 24
 
 	if remaining_hours == 0:
 		return "%dd" % days
@@ -881,15 +711,11 @@ func _format_prospect_status(status: String) -> String:
 			return status.capitalize()
 
 
-func _add_event(message: String) -> void:
-	var timestamp: String = "Day %d %02d:00" % [_get_day_number(), _get_hour_of_day()]
-	event_log.insert(0, "%s — %s" % [timestamp, message])
-
-
 func _clear_container_children(container: Node) -> void:
 	for child in container.get_children():
 		container.remove_child(child)
 		child.queue_free()
+
 
 func _format_string_list(items_variant: Variant) -> String:
 	var items: Array = items_variant as Array
@@ -903,148 +729,42 @@ func _format_string_list(items_variant: Variant) -> String:
 
 	return text.strip_edges()
 
-func _get_good_amount(stockpile: Dictionary, good_key: String) -> float:
-	if not stockpile["goods"].has(good_key):
-		return 0.0
-	return float(stockpile["goods"][good_key]["amount"])
 
-
-func _get_good_cap(stockpile: Dictionary, good_key: String) -> float:
-	if not stockpile["goods"].has(good_key):
-		return 0.0
-	return float(stockpile["goods"][good_key]["cap"])
-
-
-func _set_good_amount(stockpile: Dictionary, good_key: String, value: float) -> void:
-	if not stockpile["goods"].has(good_key):
+func _assign_mine_worker(prospect_id: String) -> void:
+	if not GameState.prospects.has(prospect_id):
 		return
-	var good: Dictionary = stockpile["goods"][good_key]
-	good["amount"] = clampf(value, 0.0, float(good["cap"]))
-	stockpile["goods"][good_key] = good
-
-
-func _adjust_good_amount(stockpile: Dictionary, good_key: String, delta: float) -> void:
-	if not stockpile["goods"].has(good_key):
+	var prospect: Dictionary = GameState.prospects[prospect_id]
+	if str(prospect["status"]) != "mine_operational":
 		return
-	_set_good_amount(stockpile, good_key, _get_good_amount(stockpile, good_key) + delta)
-
-
-func _add_good_to_stockpile(stockpile: Dictionary, good_key: String, cap: float) -> void:
-	if stockpile["goods"].has(good_key):
+	if int(prospect.get("mine_workers", 0)) >= 1:
 		return
-	stockpile["goods"][good_key] = {"amount": 0.0, "cap": cap}
-
-
-func _get_stockpile_for_location(location_id: String) -> Dictionary:
-	if location_id == "hearthmere":
-		return hearthmere["stockpile"]
-	if prospects.has(location_id):
-		var prospect: Dictionary = prospects[location_id]
-		if prospect.has("stockpile"):
-			return prospect["stockpile"]
-	return {}
-
-
-func _format_good_name(good_key: String) -> String:
-	if material_codex.has(good_key):
-		return str(material_codex[good_key]["name"])
-	return good_key.capitalize()
-
-
-func _advance_shipments_for_one_hour() -> void:
-	for i in range(active_shipments.size() - 1, -1, -1):
-		var shipment: Dictionary = active_shipments[i]
-		shipment["progress_hours"] = int(shipment["progress_hours"]) + 1
-		active_shipments[i] = shipment
-
-		if int(shipment["progress_hours"]) >= int(shipment["total_hours"]):
-			active_shipments.remove_at(i)
-			_complete_supply_shipment(shipment)
-
-
-func _start_supply_shipment(destination_id: String, route_id: String) -> void:
-	if not prospects.has(destination_id):
-		return
-
-	var destination_stockpile: Dictionary = _get_stockpile_for_location(destination_id)
-	if destination_stockpile.is_empty():
-		_add_event("Cannot dispatch shipment: destination has no stockpile.")
-		_refresh_all_ui()
-		return
-
-	if not ROUTES.has(route_id):
-		return
-
-	if _get_good_amount(hearthmere["stockpile"], "supplies") < SHIPMENT_SUPPLY_AMOUNT:
-		_add_event("Not enough supplies to dispatch shipment.")
-		_refresh_all_ui()
-		return
-
 	if _get_unassigned_labor_teams() <= 0:
-		_add_event("No labor available to dispatch caravan.")
-		_refresh_all_ui()
+		EventBus.add_event("No unassigned labor available to staff mine.")
 		return
-
-	_adjust_good_amount(hearthmere["stockpile"], "supplies", -SHIPMENT_SUPPLY_AMOUNT)
-
-	var route: Dictionary = ROUTES[route_id]
-	var shipment_id: String = "shipment_%d" % (active_shipments.size() + 1)
-
-	var shipment: Dictionary = {
-		"id": shipment_id,
-		"status": "in_transit",
-		"source": "hearthmere",
-		"destination": destination_id,
-		"route": route_id,
-		"cargo": {"supplies": SHIPMENT_SUPPLY_AMOUNT},
-		"title": "Ship Supplies → %s" % prospects[destination_id]["name"],
-		"progress_hours": 0,
-		"total_hours": int(route["travel_hours"]),
-		"labor_teams": 1,
-	}
-
-	active_shipments.append(shipment)
-
-	_add_event("Supply shipment dispatched to %s via %s." % [
-		prospects[destination_id]["name"],
-		route["name"],
-	])
-
-	_refresh_all_ui()
+	GameState.assign_mine_worker(prospect_id)
 
 
-func _complete_supply_shipment(shipment: Dictionary) -> void:
-	var destination_id: String = str(shipment["destination"])
-	var destination_stockpile: Dictionary = _get_stockpile_for_location(destination_id)
-
-	if destination_stockpile.is_empty():
-		_add_event("Shipment arrived but no destination stockpile found. Cargo lost.")
+func _remove_mine_worker(prospect_id: String) -> void:
+	if not GameState.prospects.has(prospect_id):
 		return
-
-	var cargo: Dictionary = shipment["cargo"]
-	for good_key in cargo.keys():
-		var arriving_amount: float = float(cargo[good_key])
-		var current: float = _get_good_amount(destination_stockpile, good_key)
-		var cap: float = _get_good_cap(destination_stockpile, good_key)
-		var space: float = cap - current
-		var delivered: float = minf(arriving_amount, space)
-		var wasted: float = arriving_amount - delivered
-
-		_adjust_good_amount(destination_stockpile, good_key, delivered)
-
-		if wasted > 0.0:
-			_add_event("Shipment overflow at %s: %.1f %s wasted (cap reached)." % [
-				prospects[destination_id]["name"],
-				wasted,
-				good_key.capitalize(),
-			])
-
-	_add_event("Supply shipment arrived at %s." % prospects[destination_id]["name"])
+	var prospect: Dictionary = GameState.prospects[prospect_id]
+	if int(prospect.get("mine_workers", 0)) <= 0:
+		return
+	GameState.remove_mine_worker(prospect_id)
 
 
-func _discover_redglass_ore() -> void:
-	redglass_known = true
-	material_codex["redglass_ore"] = ScenarioData.get_redglass_discovered_codex_entry()
+func _format_mine_production_status(status: String) -> String:
+	match status:
+		"producing":
+			return "Producing 0.5 ore/h"
+		"idle_no_workers":
+			return "Idle — no workers assigned"
+		"idle_no_supplies":
+			return "Idle — supplies depleted"
+		"idle_ore_full":
+			return "Idle — ore stockpile full"
+		_:
+			return status
 
 
 func _build_debug_panel(parent: Control) -> void:
@@ -1120,34 +840,29 @@ func _build_debug_panel(parent: Control) -> void:
 
 
 func _debug_set_supplies(value: float) -> void:
-	var stockpile: Dictionary = hearthmere["stockpile"]
+	var stockpile: Dictionary = GameState.hearthmere["stockpile"]
 	if value < 0.0:
-		var cap: float = _get_good_cap(stockpile, "supplies")
-		_set_good_amount(stockpile, "supplies", cap)
-		_add_event("[DEBUG] Supplies set to full (%.1f)." % cap)
+		var cap: float = StockpileSystem.get_good_cap(stockpile, "supplies")
+		StockpileSystem.set_good_amount(stockpile, "supplies", cap)
+		EventBus.add_event("[DEBUG] Supplies set to full (%.1f)." % cap)
 	else:
-		_set_good_amount(stockpile, "supplies", value)
-		_add_event("[DEBUG] Supplies set to %.1f." % value)
+		StockpileSystem.set_good_amount(stockpile, "supplies", value)
+		EventBus.add_event("[DEBUG] Supplies set to %.1f." % value)
 	_refresh_all_ui()
 
 
 func _debug_adjust_supplies(delta: float) -> void:
-	var stockpile: Dictionary = hearthmere["stockpile"]
-	_adjust_good_amount(stockpile, "supplies", delta)
-	var new_val: float = _get_good_amount(stockpile, "supplies")
-	_add_event("[DEBUG] Supplies adjusted by %.1f → %.1f." % [delta, new_val])
+	var stockpile: Dictionary = GameState.hearthmere["stockpile"]
+	StockpileSystem.adjust_good_amount(stockpile, "supplies", delta)
+	var new_val: float = StockpileSystem.get_good_amount(stockpile, "supplies")
+	EventBus.add_event("[DEBUG] Supplies adjusted by %.1f → %.1f." % [delta, new_val])
 	_refresh_all_ui()
 
 
 func _debug_force_complete_top_project() -> void:
-	if active_projects.is_empty():
-		_add_event("[DEBUG] No active projects to complete.")
-		return
-
-	var project: Dictionary = active_projects[0]
-	active_projects.remove_at(0)
-	_add_event("[DEBUG] Force-completed project: %s." % str(project["title"]))
-	_complete_project(project)
+	_suppress_refresh = true
+	ProjectSystem.force_complete_top_project()
+	_suppress_refresh = false
 	_refresh_all_ui()
 
 
