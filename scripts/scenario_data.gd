@@ -52,6 +52,35 @@ const REDGLASS_DISCOVERED_CODEX_ENTRY: Dictionary = {
 	],
 }
 
+const REDGLASS_TESTED_CODEX_ENTRY: Dictionary = {
+	"name": "Redglass Ore",
+	"status": "Known / Tested",
+	"known_source": "Redglass Foothills",
+	"observed_traits": [
+		"Red, glassy mineral seam",
+		"Local workers do not recognize it",
+		"Surface samples are stable enough to transport",
+	],
+	"tested_properties": [
+		"Hardness: Moderate. Workable with standard forge tools.",
+		"Thermal response: Holds heat unusually well. Slow to cool.",
+		"Structural integrity: Dense. Resists fracture under compression.",
+		"Edge retention: Promising. Holds a grind without flaking.",
+	],
+	"known_uses": [
+		"Potential weapon material — edge retention and hardness suggest bladed use.",
+		"Potential armor material — density and thermal properties warrant further trials.",
+	],
+	"field_notes": [
+		"Academy staff note an unfamiliar crystalline structure. Source is volcanic or deeper.",
+	],
+	"unresolved_questions": [
+		"Full weapon output requires forge project.",
+		"Armor suitability unconfirmed without craft trial.",
+		"Long-term thermal behavior under sustained use unknown.",
+	],
+}
+
 const PROSPECTS: Dictionary = {
 	"red_seam": {
 		"name": "Unusual Red Seam",
@@ -212,6 +241,39 @@ const REGIONS: Dictionary = {
 }
 
 
+const FORGE_OUTPUTS: Dictionary = {
+	"redglass_blade": {
+		"name": "Redglass Blade",
+		"output_type": "redglass_blade",
+		"required_material_type": "ore",
+		"duration_hours": 24,
+		"labor_teams": 1,
+		"produces_good": "redglass_blade",
+		"produces_amount": 1.0,
+		"stockpile_cap": 500.0,
+	},
+	"redglass_armor_piece": {
+		"name": "Redglass Armor Piece",
+		"output_type": "redglass_armor_piece",
+		"required_material_type": "ore",
+		"duration_hours": 36,
+		"labor_teams": 1,
+		"produces_good": "redglass_armor_piece",
+		"produces_amount": 1.0,
+		"stockpile_cap": 500.0,
+	},
+}
+
+const FORGE_MATERIAL_COSTS: Dictionary = {
+	"redglass_blade": {
+		"redglass_ore": 10.0,
+	},
+	"redglass_armor_piece": {
+		"redglass_ore": 15.0,
+	},
+}
+
+
 static func get_hearthmere_starting_values() -> Dictionary:
 	return HEARTHMERE_STARTING_VALUES.duplicate(true)
 
@@ -222,6 +284,10 @@ static func get_material_codex_defaults() -> Dictionary:
 
 static func get_redglass_discovered_codex_entry() -> Dictionary:
 	return REDGLASS_DISCOVERED_CODEX_ENTRY.duplicate(true)
+
+
+static func get_redglass_tested_codex_entry() -> Dictionary:
+	return REDGLASS_TESTED_CODEX_ENTRY.duplicate(true)
 
 
 static func get_prospects() -> Dictionary:
@@ -236,3 +302,11 @@ static func get_region_order() -> Array[String]:
 
 static func get_regions() -> Dictionary:
 	return REGIONS.duplicate(true)
+
+
+static func get_forge_outputs() -> Dictionary:
+	return FORGE_OUTPUTS.duplicate(true)
+
+
+static func get_forge_material_costs() -> Dictionary:
+	return FORGE_MATERIAL_COSTS.duplicate(true)

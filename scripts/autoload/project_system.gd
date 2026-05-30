@@ -2,6 +2,8 @@ extends Node
 
 signal state_changed
 
+const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
+
 var active_projects: Array[Dictionary] = []
 
 func _ready() -> void:
@@ -134,8 +136,137 @@ func _complete_project(project: Dictionary) -> void:
 		_complete_survey_project(str(project["target_id"]))
 	elif project_type == "establish_mine":
 		_complete_establish_mine_project(str(project["target_id"]))
+	elif project_type == "analyze_material":
+		_complete_analysis_project(str(project["target_id"]))
+	elif project_type == "forge_output":
+		_complete_forge_project(project)
 	else:
 		EventBus.add_event("Project completed: %s." % str(project["title"]))
+
+func start_forge_project(output_type: String, material_inputs: Dictionary) -> void:
+	var forge_outputs: Dictionary = ScenarioData.get_forge_outputs()
+	var forge_costs: Dictionary = ScenarioData.get_forge_material_costs()
+
+	if not forge_outputs.has(output_type):
+		EventBus.add_event("Unknown forge output: %s." % output_type)
+		emit_signal("state_changed")
+		return
+
+	if not CodexSystem.redglass_tested:
+		EventBus.add_event("Material analysis required before forge output.")
+		emit_signal("state_changed")
+		return
+
+	var output_def: Dictionary = forge_outputs[output_type]
+	var costs: Dictionary = forge_costs.get(output_type, {})
+
+	if _get_unassigned_labor_teams() < int(output_def["labor_teams"]):
+		EventBus.add_event("Not enough labor available for forge project.")
+		emit_signal("state_changed")
+		return
+
+	var stockpile: Dictionary = GameState.hearthmere["stockpile"]
+
+	for good_key in costs.keys():
+		var required: float = float(costs[good_key])
+		if StockpileSystem.get_good_amount(stockpile, str(good_key)) < required:
+			var display: String = CodexSystem.get_display_name(str(good_key))
+			EventBus.add_event("Not enough %s at Hearthmere for forge project (need %.0f)." % [display, required])
+			emit_signal("state_changed")
+			return
+
+	for good_key in costs.keys():
+		StockpileSystem.adjust_good_amount(stockpile, str(good_key), -float(costs[good_key]))
+
+	StockpileSystem.add_good_to_stockpile(stockpile, str(output_def["produces_good"]), float(output_def["stockpile_cap"]))
+
+	var project: Dictionary = {
+		"id": "forge_%s_%d" % [output_type, SimClock.game_hour],
+		"type": "forge_output",
+		"output_type": output_type,
+		"material_inputs": material_inputs.duplicate(),
+		"title": "Forge: %s" % str(output_def["name"]),
+		"remaining_hours": int(output_def["duration_hours"]),
+		"total_hours": int(output_def["duration_hours"]),
+		"labor_teams": int(output_def["labor_teams"]),
+	}
+	active_projects.append(project)
+
+	EventBus.add_event("Forge project started: %s." % str(output_def["name"]))
+	emit_signal("state_changed")
+
+
+func _complete_forge_project(project: Dictionary) -> void:
+	var output_type: String = str(project["output_type"])
+	var forge_outputs: Dictionary = ScenarioData.get_forge_outputs()
+
+	if not forge_outputs.has(output_type):
+		EventBus.add_event("Forge project completed with unknown output type: %s." % output_type)
+		return
+
+	var output_def: Dictionary = forge_outputs[output_type]
+	var produces_good: String = str(output_def["produces_good"])
+	var produces_amount: float = float(output_def["produces_amount"])
+
+	StockpileSystem.adjust_good_amount(GameState.hearthmere["stockpile"], produces_good, produces_amount)
+
+	EventBus.add_event("Forge complete: %s. Added to Hearthmere stockpile." % str(output_def["name"]))
+
+
+func start_analysis_project() -> void:
+	if not CodexSystem.redglass_known:
+		EventBus.add_event("No known material to analyze.")
+		emit_signal("state_changed")
+		return
+
+	if CodexSystem.redglass_tested:
+		EventBus.add_event("Redglass Ore has already been analyzed.")
+		emit_signal("state_changed")
+		return
+
+	for p in active_projects:
+		if str(p["type"]) == "analyze_material":
+			EventBus.add_event("Analysis already in progress.")
+			emit_signal("state_changed")
+			return
+
+	if _get_unassigned_labor_teams() < 1:
+		EventBus.add_event("No unassigned labor team available for analysis.")
+		emit_signal("state_changed")
+		return
+
+	var ore_cost: float = 5.0
+	var stockpile: Dictionary = GameState.hearthmere["stockpile"]
+	if StockpileSystem.get_good_amount(stockpile, "redglass_ore") < ore_cost:
+		EventBus.add_event("Not enough Redglass Ore at Hearthmere for analysis (need 5).")
+		emit_signal("state_changed")
+		return
+
+	StockpileSystem.adjust_good_amount(stockpile, "redglass_ore", -ore_cost)
+
+	var project: Dictionary = {
+		"id": "analyze_redglass_ore",
+		"type": "analyze_material",
+		"target_id": "redglass_ore",
+		"title": "Analyze: Redglass Ore",
+		"remaining_hours": 48,
+		"total_hours": 48,
+		"labor_teams": 1,
+	}
+	active_projects.append(project)
+
+	EventBus.add_event("Analysis started: Redglass Ore. Samples drawn from Hearthmere stockpile.")
+	emit_signal("state_changed")
+
+
+func _complete_analysis_project(material_id: String) -> void:
+	if material_id == "redglass_ore":
+		CodexSystem.test_redglass_ore()
+		EventBus.add_event("Analysis complete: Redglass Ore. Material Codex updated.")
+		EventBus.add_event("Redglass Ore shows strong edge retention and unusual thermal properties. Forge trials recommended.")
+	else:
+		EventBus.add_event("Analysis complete: %s." % material_id)
+
 
 func _complete_survey_project(prospect_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):

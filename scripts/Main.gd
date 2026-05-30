@@ -1,6 +1,7 @@
 extends Control
 
 const DEBUG_MODE: bool = true
+const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
 
 var selected_region_id: String = "hearthmere"
 var _suppress_refresh: bool = false
@@ -11,6 +12,7 @@ var info_body: Label
 var economy_body: Label
 var prospects_body: Label
 var prospect_buttons_box: VBoxContainer
+var region_action_buttons_box: VBoxContainer
 var projects_body: Label
 var shipments_body: Label
 var event_log_body: Label
@@ -19,6 +21,7 @@ var supply_plus_button: Button
 var codex_body: Label
 
 var region_buttons: Dictionary = {}
+var _map_canvas: MapCanvas
 
 
 func _ready() -> void:
@@ -114,14 +117,13 @@ func _build_body(parent: Control) -> void:
 func _build_map_panel(parent: Control) -> void:
 	var map_panel := PanelContainer.new()
 	map_panel.name = "MapPanel"
-	map_panel.custom_minimum_size = Vector2(420, 0)
+	map_panel.custom_minimum_size = Vector2(460, 540)
 	map_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	parent.add_child(map_panel)
 
 	var map_content := VBoxContainer.new()
 	map_content.name = "MapContent"
-	map_content.add_theme_constant_override("separation", 8)
 	map_panel.add_child(map_content)
 
 	var map_title := Label.new()
@@ -129,33 +131,22 @@ func _build_map_panel(parent: Control) -> void:
 	map_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	map_content.add_child(map_title)
 
-	var subtitle := Label.new()
-	subtitle.text = "Click a region to inspect it. Phase 1A is non-combat."
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	map_content.add_child(subtitle)
+	var canvas := MapCanvas.new()
+	canvas.name = "MapCanvas"
+	canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	canvas.custom_minimum_size = Vector2(460, 520)
+	map_content.add_child(canvas)
+	canvas.setup(self)
 
-	var map_grid := GridContainer.new()
-	map_grid.name = "RegionButtonGrid"
-	map_grid.columns = 2
-	map_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	map_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	map_content.add_child(map_grid)
+	var overlay := ShipmentOverlay.new()
+	overlay.name = "ShipmentOverlay"
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(overlay)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	canvas._overlay = overlay
 
-	for region_id in GameState.region_order:
-		var button := Button.new()
-		button.text = GameState.regions[region_id]["name"]
-		button.custom_minimum_size = Vector2(180, 64)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		button.pressed.connect(_select_region.bind(region_id))
-		map_grid.add_child(button)
-		region_buttons[region_id] = button
-
-	var note := Label.new()
-	note.text = "Phase 1A goal: inspect map → survey prospect → confirm material → claim deposit → mine → ship → test/forge."
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	map_content.add_child(note)
+	_map_canvas = canvas
 
 
 func _build_side_panel(parent: Control) -> void:
@@ -204,6 +195,11 @@ func _build_region_info_panel(parent: Control) -> void:
 	info_body.text = ""
 	info_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info_content.add_child(info_body)
+
+	region_action_buttons_box = VBoxContainer.new()
+	region_action_buttons_box.name = "RegionActionButtons"
+	region_action_buttons_box.add_theme_constant_override("separation", 6)
+	info_content.add_child(region_action_buttons_box)
 
 
 func _build_prospects_panel(parent: Control) -> void:
@@ -409,30 +405,59 @@ func _refresh_region_panel() -> void:
 	for item in region["known_contents"]:
 		known_text += "- %s\n" % item
 
-	var action_text := ""
-	for action in region["available_actions"]:
-		action_text += "- %s\n" % action
-
 	info_body.text = (
 		"Type: %s\n"
 		+ "Status: %s\n\n"
 		+ "%s\n\n"
-		+ "Phase 1A Role:\n%s\n\n"
-		+ "Known Contents:\n%s\n"
-		+ "Available Actions:\n%s"
+		+ "Known Contents:\n%s"
 	) % [
 		region["type"],
 		region["status"],
 		region["description"],
-		region["phase_1a_role"],
-		known_text,
-		action_text,
+		known_text.strip_edges(),
 	]
+
+	_clear_container_children(region_action_buttons_box)
+
+	if selected_region_id == "hearthmere" and CodexSystem.redglass_known and not CodexSystem.redglass_tested:
+		var already_running := false
+		for p in ProjectSystem.active_projects:
+			if str(p["type"]) == "analyze_material":
+				already_running = true
+				break
+
+		if not already_running:
+			var ore_in_stockpile: float = StockpileSystem.get_good_amount(GameState.hearthmere["stockpile"], "redglass_ore")
+			if ore_in_stockpile > 0.0:
+				var btn := Button.new()
+				btn.text = "Analyze Redglass Ore (2d, 1 labor, 5 ore)"
+				btn.disabled = _get_unassigned_labor_teams() < 1 or ore_in_stockpile < 5.0
+				btn.pressed.connect(_start_analysis_project)
+				region_action_buttons_box.add_child(btn)
+
+
+	if selected_region_id == "hearthmere" and CodexSystem.redglass_tested:
+		var forge_costs: Dictionary = ScenarioData.get_forge_material_costs()
+		var ore_available: float = StockpileSystem.get_good_amount(GameState.hearthmere["stockpile"], "redglass_ore")
+
+		var blade_ore_cost: float = float(forge_costs.get("redglass_blade", {}).get("redglass_ore", 0.0))
+		var btn_blade := Button.new()
+		btn_blade.text = "Forge Redglass Blade (24h, 1 labor, 10 ore)"
+		btn_blade.disabled = _get_unassigned_labor_teams() < 1 or ore_available < blade_ore_cost
+		btn_blade.pressed.connect(_start_forge_project.bind("redglass_blade"))
+		region_action_buttons_box.add_child(btn_blade)
+
+		var armor_ore_cost: float = float(forge_costs.get("redglass_armor_piece", {}).get("redglass_ore", 0.0))
+		var btn_armor := Button.new()
+		btn_armor.text = "Forge Redglass Armor Piece (36h, 1 labor, 15 ore)"
+		btn_armor.disabled = _get_unassigned_labor_teams() < 1 or ore_available < armor_ore_cost
+		btn_armor.pressed.connect(_start_forge_project.bind("redglass_armor_piece"))
+		region_action_buttons_box.add_child(btn_armor)
 
 
 func _refresh_region_buttons() -> void:
-	for key in region_buttons.keys():
-		region_buttons[key].disabled = key == selected_region_id
+	if _map_canvas:
+		_map_canvas.refresh(selected_region_id)
 
 
 func _refresh_prospects_panel() -> void:
@@ -555,46 +580,33 @@ func _refresh_economy_panel() -> void:
 	var total_labor_teams: int = GameState.get_total_labor_teams()
 	var project_labor_teams: int = ProjectSystem.get_project_labor_teams()
 	var shipment_labor_teams: int = LogisticsSystem.get_shipment_labor_teams()
+	var mine_worker_teams: int = GameState.get_mine_worker_teams()
 	var unassigned_labor_teams: int = _get_unassigned_labor_teams()
 	var daily_supply_output: float = GameState.supply_production_labor_teams * float(GameState.hearthmere["supply_production_per_team_per_day"])
 
-	var stockpile_text := "Hearthmere Stockpile:\n"
+	var labor_block := "LABOR\n"
+	labor_block += "Total: %d  |  Unassigned: %d\n" % [total_labor_teams, unassigned_labor_teams]
+	labor_block += "Supply: %d  |  Projects: %d  |  Shipments: %d  |  Mine: %d\n" % [
+		GameState.supply_production_labor_teams, project_labor_teams, shipment_labor_teams, mine_worker_teams,
+	]
+	labor_block += "Supply output: %.1f / day" % daily_supply_output
+
+	var stockpile_block := "HEARTHMERE STOCKPILE\n"
 	for good_key in GameState.hearthmere["stockpile"]["goods"].keys():
 		var amount: float = StockpileSystem.get_good_amount(GameState.hearthmere["stockpile"], good_key)
 		var cap: float = StockpileSystem.get_good_cap(GameState.hearthmere["stockpile"], good_key)
-		stockpile_text += "- %s: %.1f / %.1f\n" % [CodexSystem.get_display_name(good_key), amount, cap]
+		var display: String = CodexSystem.get_display_name(str(good_key))
+		var bar: String = _ascii_bar(amount, cap, 10)
+		stockpile_block += "%-18s %6.1f / %-6.1f %s\n" % [display + ":", amount, cap, bar]
+	stockpile_block = stockpile_block.strip_edges()
 
-	economy_body.text = (
-		"Population: %d\n"
-		+ "Available Workforce: %d\n"
-		+ "Labor Team Size: %d workers\n"
-		+ "Total Labor Teams: %d\n"
-		+ "Supply Production Labor: %d\n"
-		+ "Project Labor: %d\n"
-		+ "Shipment Labor: %d\n"
-		+ "Unassigned Labor Teams: %d\n"
-		+ "Supply Output: %.1f / day\n\n"
-		+ "%s\n"
-		+ "Mobilized Manpower: %d\n"
-		+ "Recovering: %d\n"
-		+ "Recent Losses: %d\n"
-		+ "Settlement Defense: %d, immobile"
-	) % [
+	var manpower_block := "MANPOWER\n"
+	manpower_block += "Population: %d  |  Defense: %d" % [
 		int(GameState.hearthmere["population"]),
-		int(GameState.hearthmere["available_workforce"]),
-		int(GameState.hearthmere["labor_team_size"]),
-		total_labor_teams,
-		GameState.supply_production_labor_teams,
-		project_labor_teams,
-		shipment_labor_teams,
-		unassigned_labor_teams,
-		daily_supply_output,
-		stockpile_text.strip_edges(),
-		int(GameState.hearthmere["mobilized_manpower"]),
-		int(GameState.hearthmere["recovering"]),
-		int(GameState.hearthmere["recent_losses"]),
 		int(GameState.hearthmere["settlement_defense"]),
 	]
+
+	economy_body.text = labor_block + "\n\n" + stockpile_block + "\n\n" + manpower_block
 
 	supply_minus_button.disabled = GameState.supply_production_labor_teams <= 0
 	supply_plus_button.disabled = unassigned_labor_teams <= 0
@@ -607,9 +619,11 @@ func _refresh_projects_panel() -> void:
 
 	var text := ""
 	for project in ProjectSystem.active_projects:
-		text += "%s\n" % project["title"]
-		text += "Remaining: %s\n" % _format_hours(int(project["remaining_hours"]))
-		text += "Labor: %d team\n\n" % int(project["labor_teams"])
+		text += "%s — %s remaining (%d team)\n" % [
+			str(project["title"]),
+			_format_hours(int(project["remaining_hours"])),
+			int(project["labor_teams"]),
+		]
 
 	projects_body.text = text.strip_edges()
 
@@ -623,14 +637,23 @@ func _refresh_shipments_panel() -> void:
 	for shipment in LogisticsSystem.active_shipments:
 		var destination_id: String = str(shipment["destination"])
 		var route_id: String = str(shipment["route"])
-		text += "Ship Supplies → %s\n" % str(GameState.prospects[destination_id]["name"])
-		text += "Status: %s\n" % str(shipment["status"])
-		text += "Route: %s\n" % str(LogisticsSystem.ROUTES[route_id]["name"])
-		text += "Progress: %dh / %dh\n" % [int(shipment["progress_hours"]), int(shipment["total_hours"])]
+		var dest_name: String = LogisticsSystem.get_location_name(destination_id)
+		var route_name: String = str(LogisticsSystem.ROUTES[route_id]["name"])
+
 		var cargo: Dictionary = shipment["cargo"]
+		var cargo_summary := ""
 		for good_key in cargo.keys():
-			text += "Cargo: %s: %.1f\n" % [CodexSystem.get_display_name(good_key), float(cargo[good_key])]
-		text += "Labor: %d team\n\n" % int(shipment["labor_teams"])
+			if not cargo_summary.is_empty():
+				cargo_summary += ", "
+			cargo_summary += CodexSystem.get_display_name(str(good_key))
+
+		text += "%s → %s via %s — %s / %s\n" % [
+			cargo_summary,
+			dest_name,
+			route_name,
+			_format_hours(int(shipment["progress_hours"])),
+			_format_hours(int(shipment["total_hours"])),
+		]
 
 	shipments_body.text = text.strip_edges()
 
@@ -682,6 +705,13 @@ func _refresh_codex_panel() -> void:
 	]
 
 
+func _ascii_bar(amount: float, cap: float, width: int) -> String:
+	if cap <= 0.0:
+		return "[" + " ".repeat(width) + "]"
+	var filled: int = int(clampf(amount / cap, 0.0, 1.0) * float(width))
+	return "[" + "=".repeat(filled) + " ".repeat(width - filled) + "]"
+
+
 func _format_hours(hours: int) -> String:
 	if hours < 24:
 		return "%dh" % hours
@@ -728,6 +758,16 @@ func _format_string_list(items_variant: Variant) -> String:
 		text += "- %s\n" % str(item)
 
 	return text.strip_edges()
+
+
+func _start_analysis_project() -> void:
+	ProjectSystem.start_analysis_project()
+
+
+func _start_forge_project(output_type: String) -> void:
+	var costs: Dictionary = ScenarioData.get_forge_material_costs()
+	var material_inputs: Dictionary = costs.get(output_type, {}).duplicate()
+	ProjectSystem.start_forge_project(output_type, material_inputs)
 
 
 func _assign_mine_worker(prospect_id: String) -> void:
@@ -868,3 +908,96 @@ func _debug_force_complete_top_project() -> void:
 
 func _debug_reset_game() -> void:
 	get_tree().reload_current_scene()
+
+
+class MapCanvas extends Control:
+	var _main: Node
+	var _region_buttons: Dictionary = {}
+	var _overlay: Control
+
+	const REGION_POSITIONS: Dictionary = {
+		"silent_border":      Vector2(200, 30),
+		"blackbanner_camp":   Vector2(80,  130),
+		"ashen_pass":         Vector2(280, 180),
+		"hearthmere":         Vector2(200, 280),
+		"redglass_foothills": Vector2(340, 340),
+		"old_pine_road":      Vector2(120, 370),
+		"westmere_farms":     Vector2(60,  460),
+	}
+
+	const ROUTE_CONNECTIONS: Array = [
+		["silent_border",      "blackbanner_camp"],
+		["silent_border",      "ashen_pass"],
+		["blackbanner_camp",   "hearthmere"],
+		["ashen_pass",         "hearthmere"],
+		["ashen_pass",         "redglass_foothills"],
+		["hearthmere",         "old_pine_road"],
+		["old_pine_road",      "westmere_farms"],
+		["old_pine_road",      "redglass_foothills"],
+	]
+
+	const ROUTE_PATHS: Dictionary = {
+		"ashen_pass":    ["hearthmere", "ashen_pass",    "redglass_foothills"],
+		"old_pine_road": ["hearthmere", "old_pine_road", "redglass_foothills"],
+	}
+
+	func _draw() -> void:
+		for conn in ROUTE_CONNECTIONS:
+			var a: Vector2 = REGION_POSITIONS[conn[0]]
+			var b: Vector2 = REGION_POSITIONS[conn[1]]
+			draw_line(a, b, Color(0.5, 0.5, 0.5), 1.5)
+
+	func setup(main: Node) -> void:
+		_main = main
+		_region_buttons.clear()
+
+		for region_id in GameState.region_order:
+			var btn := Button.new()
+			btn.name = "RegionBtn_%s" % region_id
+			btn.custom_minimum_size = Vector2(110, 48)
+			btn.pressed.connect(main._select_region.bind(region_id))
+			add_child(btn)
+
+			var pos: Vector2 = REGION_POSITIONS.get(region_id, Vector2(200, 200))
+			btn.position = pos - Vector2(55, 24)
+
+			_region_buttons[region_id] = btn
+
+	func refresh(selected_region_id: String) -> void:
+		for region_id in _region_buttons.keys():
+			var btn: Button = _region_buttons[region_id]
+			btn.disabled = (region_id == selected_region_id)
+
+			btn.text = GameState.regions[region_id]["name"]
+
+		queue_redraw()
+		if _overlay:
+			_overlay.queue_redraw()
+
+
+class ShipmentOverlay extends Control:
+	func _draw() -> void:
+		var shipments: Array = LogisticsSystem.active_shipments
+
+		for shipment in shipments:
+			var route_id: String = str(shipment["route"])
+			if not MapCanvas.ROUTE_PATHS.has(route_id):
+				continue
+
+			var path: Array = MapCanvas.ROUTE_PATHS[route_id]
+			var t: float = clampf(float(shipment["progress_hours"]) / float(shipment["total_hours"]), 0.0, 1.0)
+
+			var dot_pos: Vector2
+			if t < 0.5:
+				dot_pos = MapCanvas.REGION_POSITIONS[path[0]].lerp(MapCanvas.REGION_POSITIONS[path[1]], t * 2.0)
+			else:
+				dot_pos = MapCanvas.REGION_POSITIONS[path[1]].lerp(MapCanvas.REGION_POSITIONS[path[2]], (t - 0.5) * 2.0)
+
+			var cargo: Dictionary = shipment["cargo"]
+			var dot_color: Color = Color(1.0, 0.85, 0.2)
+			for good_key in cargo.keys():
+				if "ore" in str(good_key):
+					dot_color = Color(1.0, 0.5, 0.1)
+					break
+
+			draw_circle(dot_pos, 5.0, dot_color)
