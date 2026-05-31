@@ -320,7 +320,7 @@ func _build_projects_panel(parent: Control) -> void:
 	projects_panel.add_child(projects_content)
 
 	var projects_title := Label.new()
-	projects_title.text = "Active Projects"
+	projects_title.text = "Active Projects / Movement"
 	projects_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	projects_content.add_child(projects_title)
 
@@ -667,16 +667,12 @@ func _refresh_economy_panel() -> void:
 
 func _refresh_projects_panel() -> void:
 	if ProjectSystem.active_projects.is_empty():
-		projects_body.text = "No active projects."
+		projects_body.text = "No active projects or crews."
 		return
 
 	var text := ""
 	for project in ProjectSystem.active_projects:
-		text += "%s — %s remaining (%d team)\n" % [
-			str(project["title"]),
-			_format_hours(int(project["remaining_hours"])),
-			int(project["labor_teams"]),
-		]
+		text += "%s\n" % _format_project_activity(project)
 
 	projects_body.text = text.strip_edges()
 
@@ -688,27 +684,119 @@ func _refresh_shipments_panel() -> void:
 
 	var text := ""
 	for shipment in LogisticsSystem.active_shipments:
-		var destination_id: String = str(shipment["destination"])
-		var route_id: String = str(shipment["route"])
-		var dest_name: String = LogisticsSystem.get_location_name(destination_id)
-		var route_name: String = str(LogisticsSystem.ROUTES[route_id]["name"])
-
-		var cargo: Dictionary = shipment["cargo"]
-		var cargo_summary := ""
-		for good_key in cargo.keys():
-			if not cargo_summary.is_empty():
-				cargo_summary += ", "
-			cargo_summary += CodexSystem.get_display_name(str(good_key))
-
-		text += "%s → %s via %s — %s / %s\n" % [
-			cargo_summary,
-			dest_name,
-			route_name,
-			_format_hours(int(shipment["progress_hours"])),
-			_format_hours(int(shipment["total_hours"])),
-		]
+		text += "%s\n" % _format_shipment_activity(shipment)
 
 	shipments_body.text = text.strip_edges()
+
+
+func _format_project_activity(project: Dictionary) -> String:
+	var project_type: String = str(project.get("type", ""))
+	var project_state: String = str(project.get("state", ""))
+	var target_id: String = str(project.get("target_id", ""))
+	var target_name: String = _get_activity_location_name(target_id)
+	var labor_text: String = _format_team_count(int(project.get("labor_teams", 0)))
+	var remaining_hours: int = _get_project_remaining_hours(project)
+
+	if project_type == "survey_expedition":
+		if project_state == "traveling_to_site":
+			return "Survey Party -> %s: Traveling, ETA ~%s (%s)" % [
+				target_name,
+				_format_hours(remaining_hours),
+				labor_text,
+			]
+		if project_state == "surveying_on_site":
+			return "%s Survey: Surveying on site, %s remaining (%s)" % [
+				target_name,
+				_format_hours(remaining_hours),
+				labor_text,
+			]
+
+	if project_type == "establish_mine":
+		if project_state == "traveling_to_site":
+			return "Mine Work Crew -> %s: Traveling, ETA ~%s (%s)" % [
+				target_name,
+				_format_hours(remaining_hours),
+				labor_text,
+			]
+		if project_state == "building_on_site":
+			return "%s Mine: Building on site, %s remaining (%s)" % [
+				target_name,
+				_format_hours(remaining_hours),
+				labor_text,
+			]
+
+	return "%s: %s remaining (%s)" % [
+		str(project.get("title", "Project")),
+		_format_hours(remaining_hours),
+		labor_text,
+	]
+
+
+func _get_project_remaining_hours(project: Dictionary) -> int:
+	if bool(project.get("uses_strategic_entity", false)):
+		var entity_id: String = str(project.get("entity_id", ""))
+		return StrategicMap.estimate_remaining_path_hours(entity_id)
+	return int(project.get("remaining_hours", 0))
+
+
+func _format_shipment_activity(shipment: Dictionary) -> String:
+	var source_id: String = str(shipment.get("source", ""))
+	var destination_id: String = str(shipment.get("destination", ""))
+	var route_id: String = str(shipment.get("route", ""))
+	var source_name: String = LogisticsSystem.get_location_name(source_id)
+	var destination_name: String = LogisticsSystem.get_location_name(destination_id)
+	var route_name: String = str(LogisticsSystem.ROUTES.get(route_id, {}).get("name", route_id))
+	var cargo: Dictionary = shipment.get("cargo", {}) as Dictionary
+	var cargo_summary: String = _format_cargo_summary(cargo)
+	var remaining_hours: int = _get_shipment_remaining_hours(shipment)
+	var status_text: String = "In transit"
+	if not bool(shipment.get("uses_strategic_entity", false)):
+		status_text = "In transit by route timer"
+
+	return "%s Caravan: %s -> %s via %s, %s, ETA ~%s" % [
+		cargo_summary,
+		source_name,
+		destination_name,
+		route_name,
+		status_text,
+		_format_hours(remaining_hours),
+	]
+
+
+func _get_shipment_remaining_hours(shipment: Dictionary) -> int:
+	if bool(shipment.get("uses_strategic_entity", false)):
+		var entity_id: String = str(shipment.get("entity_id", ""))
+		return StrategicMap.estimate_remaining_path_hours(entity_id)
+	var total_hours: int = int(shipment.get("total_hours", 0))
+	var progress_hours: int = int(shipment.get("progress_hours", 0))
+	return max(0, total_hours - progress_hours)
+
+
+func _format_cargo_summary(cargo: Dictionary) -> String:
+	if cargo.is_empty():
+		return "Cargo"
+	var parts: Array[String] = []
+	for good_key in cargo.keys():
+		var amount: float = float(cargo[good_key])
+		var display_name: String = CodexSystem.get_display_name(str(good_key))
+		parts.append("%.0f %s" % [amount, display_name])
+	return ", ".join(parts)
+
+
+func _get_activity_location_name(location_id: String) -> String:
+	if location_id.is_empty():
+		return "Unknown Site"
+	if location_id == "hearthmere":
+		return "Hearthmere"
+	if GameState.prospects.has(location_id):
+		return str(GameState.prospects[location_id]["name"])
+	return location_id.capitalize()
+
+
+func _format_team_count(team_count: int) -> String:
+	if team_count == 1:
+		return "1 team"
+	return "%d teams" % team_count
 
 
 func _refresh_event_log_panel() -> void:
