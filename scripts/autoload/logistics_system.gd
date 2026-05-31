@@ -78,9 +78,16 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 
 	var route: Dictionary = ROUTES[route_id]
 	var shipment_id: String = "shipment_%d" % (active_shipments.size() + 1)
+	var entity_id: String = "entity_%s" % shipment_id
+	var source_position: Vector2 = _get_world_position_for_location(source_id)
+	var destination_position: Vector2 = _get_world_position_for_location(destination_id)
+	StrategicMap.create_entity(entity_id, "Shipment Caravan", "caravan", source_position)
+	var total_hours: int = int(route["travel_hours"])
+	StrategicMap.command_entity_to_world_position(entity_id, destination_position)
 
 	var shipment: Dictionary = {
 		"id": shipment_id,
+		"entity_id": entity_id,
 		"status": "in_transit",
 		"source": source_id,
 		"destination": destination_id,
@@ -88,8 +95,10 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 		"cargo": cargo,
 		"title": _build_shipment_title(cargo, destination_id),
 		"progress_hours": 0,
-		"total_hours": int(route["travel_hours"]),
+		"total_hours": total_hours,
 		"labor_teams": 1,
+		"world_position": source_position,
+		"destination_world_position": destination_position,
 	}
 
 	active_shipments.append(shipment)
@@ -101,6 +110,7 @@ func _advance_shipments_for_one_hour() -> void:
 	for i in range(active_shipments.size() - 1, -1, -1):
 		var shipment: Dictionary = active_shipments[i]
 		shipment["progress_hours"] = int(shipment["progress_hours"]) + 1
+		shipment["world_position"] = _get_entity_world_position(str(shipment.get("entity_id", "")))
 		active_shipments[i] = shipment
 
 		if int(shipment["progress_hours"]) >= int(shipment["total_hours"]):
@@ -110,6 +120,7 @@ func _advance_shipments_for_one_hour() -> void:
 func _complete_shipment(shipment: Dictionary) -> void:
 	var destination_id: String = str(shipment["destination"])
 	var destination_stockpile: Dictionary = StockpileSystem.get_stockpile_for_location(destination_id)
+	StrategicMap.remove_entity(str(shipment.get("entity_id", "")))
 
 	if destination_stockpile.is_empty():
 		EventBus.add_event("Shipment arrived but no destination stockpile found. Cargo lost.")
@@ -134,3 +145,21 @@ func _complete_shipment(shipment: Dictionary) -> void:
 			])
 
 	EventBus.add_event("Shipment arrived at %s." % get_location_name(destination_id))
+
+
+func _get_world_position_for_location(location_id: String) -> Vector2:
+	if StrategicMap.pois.has(location_id):
+		return StrategicMap.get_poi_world_position(location_id)
+	if GameState.prospects.has(location_id):
+		var prospect: Dictionary = GameState.prospects[location_id]
+		var region_id: String = str(prospect.get("region_id", ""))
+		if StrategicMap.pois.has(region_id):
+			return StrategicMap.get_poi_world_position(region_id)
+	return StrategicMap.get_poi_world_position("hearthmere")
+
+
+func _get_entity_world_position(entity_id: String) -> Vector2:
+	if not StrategicMap.entities.has(entity_id):
+		return Vector2.ZERO
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	return entity["world_position"] as Vector2

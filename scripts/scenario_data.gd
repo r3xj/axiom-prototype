@@ -273,6 +273,112 @@ const FORGE_MATERIAL_COSTS: Dictionary = {
 	},
 }
 
+const STRATEGIC_MAP_CONFIG: Dictionary = {
+	"world_size": Vector2(480, 520),
+	"cell_size": 40,
+}
+
+const STRATEGIC_POIS: Dictionary = {
+	"silent_border": {
+		"display_name": "The Silent Border",
+		"poi_type": "border",
+		"world_position": Vector2(200, 40),
+		"region_id": "silent_border",
+	},
+	"blackbanner_camp": {
+		"display_name": "Blackbanner Camp",
+		"poi_type": "camp",
+		"world_position": Vector2(80, 120),
+		"region_id": "blackbanner_camp",
+	},
+	"ashen_pass": {
+		"display_name": "Ashen Pass",
+		"poi_type": "route_landmark",
+		"world_position": Vector2(280, 180),
+		"region_id": "ashen_pass",
+	},
+	"hearthmere": {
+		"display_name": "Hearthmere",
+		"poi_type": "settlement",
+		"world_position": Vector2(200, 280),
+		"region_id": "hearthmere",
+	},
+	"redglass_foothills": {
+		"display_name": "Redglass Foothills",
+		"poi_type": "region",
+		"world_position": Vector2(340, 340),
+		"region_id": "redglass_foothills",
+	},
+	"red_seam": {
+		"display_name": "Unusual Red Seam",
+		"poi_type": "prospect",
+		"world_position": Vector2(360, 350),
+		"region_id": "redglass_foothills",
+	},
+	"dark_gravel": {
+		"display_name": "Dark Gravel Wash",
+		"poi_type": "prospect",
+		"world_position": Vector2(318, 374),
+		"region_id": "redglass_foothills",
+	},
+	"old_dig": {
+		"display_name": "Abandoned Dig Marks",
+		"poi_type": "prospect",
+		"world_position": Vector2(376, 306),
+		"region_id": "redglass_foothills",
+	},
+	"old_pine_road": {
+		"display_name": "Old Pine Road",
+		"poi_type": "route_landmark",
+		"world_position": Vector2(120, 370),
+		"region_id": "old_pine_road",
+	},
+	"westmere_farms": {
+		"display_name": "Westmere Farms",
+		"poi_type": "support_region",
+		"world_position": Vector2(60, 460),
+		"region_id": "westmere_farms",
+	},
+}
+
+const STRATEGIC_ROAD_POINTS: Array[Vector2] = [
+	Vector2(200, 280),
+	Vector2(240, 240),
+	Vector2(280, 180),
+	Vector2(320, 260),
+	Vector2(340, 340),
+	Vector2(200, 280),
+	Vector2(160, 320),
+	Vector2(120, 370),
+	Vector2(80, 420),
+	Vector2(60, 460),
+	Vector2(160, 320),
+	Vector2(240, 340),
+	Vector2(340, 340),
+	Vector2(200, 40),
+	Vector2(240, 120),
+	Vector2(280, 180),
+]
+
+const STRATEGIC_TERRAIN_PATCHES: Array[Dictionary] = [
+	{"cell": Vector2i(0, 0), "size": Vector2i(4, 4), "terrain": "forest"},
+	{"cell": Vector2i(7, 0), "size": Vector2i(5, 5), "terrain": "hills"},
+	{"cell": Vector2i(7, 6), "size": Vector2i(4, 4), "terrain": "hills"},
+	{"cell": Vector2i(0, 8), "size": Vector2i(4, 5), "terrain": "forest"},
+	{"cell": Vector2i(10, 3), "size": Vector2i(2, 5), "terrain": "mountain"},
+	{"cell": Vector2i(5, 4), "size": Vector2i(1, 4), "terrain": "water"},
+]
+
+const STRATEGIC_BLOCKED_CELLS: Array[Vector2i] = [
+	Vector2i(10, 3),
+	Vector2i(11, 3),
+	Vector2i(10, 4),
+	Vector2i(11, 4),
+	Vector2i(10, 5),
+	Vector2i(5, 5),
+	Vector2i(5, 6),
+]
+
 
 static func get_hearthmere_starting_values() -> Dictionary:
 	return HEARTHMERE_STARTING_VALUES.duplicate(true)
@@ -310,3 +416,27 @@ static func get_forge_outputs() -> Dictionary:
 
 static func get_forge_material_costs() -> Dictionary:
 	return FORGE_MATERIAL_COSTS.duplicate(true)
+
+
+static func get_strategic_map_config() -> Dictionary:
+	return STRATEGIC_MAP_CONFIG.duplicate(true)
+
+
+static func get_strategic_pois() -> Dictionary:
+	return STRATEGIC_POIS.duplicate(true)
+
+
+static func get_strategic_road_points() -> Array[Vector2]:
+	var road_points: Array[Vector2] = []
+	road_points.assign(STRATEGIC_ROAD_POINTS)
+	return road_points
+
+
+static func get_strategic_terrain_patches() -> Array[Dictionary]:
+	return STRATEGIC_TERRAIN_PATCHES.duplicate(true)
+
+
+static func get_strategic_blocked_cells() -> Array[Vector2i]:
+	var blocked_cells: Array[Vector2i] = []
+	blocked_cells.assign(STRATEGIC_BLOCKED_CELLS)
+	return blocked_cells

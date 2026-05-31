@@ -19,6 +19,7 @@ var event_log_body: Label
 var supply_minus_button: Button
 var supply_plus_button: Button
 var codex_body: Label
+var map_debug_body: Label
 
 var region_buttons: Dictionary = {}
 var _map_canvas: MapCanvas
@@ -32,6 +33,8 @@ func _ready() -> void:
 	ProjectSystem.state_changed.connect(_on_state_changed)
 	LogisticsSystem.state_changed.connect(_on_state_changed)
 	CodexSystem.state_changed.connect(_on_state_changed)
+	StrategicMap.entity_changed.connect(_on_strategic_map_changed)
+	StrategicMap.selected_entity_changed.connect(_on_strategic_map_changed)
 	SimClock.hours_advanced.connect(_on_hours_advanced)
 
 	EventBus.add_event("Scenario started. Hearthmere surveys its known surroundings.")
@@ -45,6 +48,13 @@ func _on_state_changed() -> void:
 
 func _on_hours_advanced() -> void:
 	_refresh_all_ui()
+
+
+func _on_strategic_map_changed() -> void:
+	if _map_canvas:
+		_map_canvas.queue_redraw()
+	if map_debug_body:
+		_refresh_map_debug_panel()
 
 
 func _clear_existing_children() -> void:
@@ -138,13 +148,6 @@ func _build_map_panel(parent: Control) -> void:
 	canvas.custom_minimum_size = Vector2(460, 520)
 	map_content.add_child(canvas)
 	canvas.setup(self)
-
-	var overlay := ShipmentOverlay.new()
-	overlay.name = "ShipmentOverlay"
-	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	canvas.add_child(overlay)
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	canvas._overlay = overlay
 
 	_map_canvas = canvas
 
@@ -390,6 +393,7 @@ func _refresh_all_ui() -> void:
 	_refresh_shipments_panel()
 	_refresh_event_log_panel()
 	_refresh_codex_panel()
+	_refresh_map_debug_panel()
 
 
 func _refresh_time_label() -> void:
@@ -878,6 +882,25 @@ func _build_debug_panel(parent: Control) -> void:
 	btn_reset.pressed.connect(_debug_reset_game)
 	debug_content.add_child(btn_reset)
 
+	var map_label := Label.new()
+	map_label.text = "— Strategic Map —"
+	debug_content.add_child(map_label)
+
+	var btn_caravan := Button.new()
+	btn_caravan.text = "[D] Select Caravan"
+	btn_caravan.pressed.connect(_debug_select_map_entity.bind("debug_caravan"))
+	debug_content.add_child(btn_caravan)
+
+	var btn_army := Button.new()
+	btn_army.text = "[D] Select Army"
+	btn_army.pressed.connect(_debug_select_map_entity.bind("debug_army"))
+	debug_content.add_child(btn_army)
+
+	map_debug_body = Label.new()
+	map_debug_body.text = ""
+	map_debug_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	debug_content.add_child(map_debug_body)
+
 
 func _debug_set_supplies(value: float) -> void:
 	var stockpile: Dictionary = GameState.hearthmere["stockpile"]
@@ -910,42 +933,155 @@ func _debug_reset_game() -> void:
 	get_tree().reload_current_scene()
 
 
+func _debug_select_map_entity(entity_id: String) -> void:
+	StrategicMap.select_entity(entity_id)
+	_refresh_map_debug_panel()
+	if _map_canvas:
+		_map_canvas.queue_redraw()
+
+
+func _refresh_map_debug_panel() -> void:
+	if not map_debug_body:
+		return
+	if not StrategicMap.entities.has(StrategicMap.selected_entity_id):
+		map_debug_body.text = "No selected strategic entity."
+		return
+
+	var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
+	var world_position: Vector2 = entity["world_position"] as Vector2
+	var cell: Vector2i = StrategicMap.world_to_cell(world_position)
+	var context: Dictionary = StrategicMap.get_tactical_context(world_position)
+	var path_points: Array = entity["path_points"]
+
+	map_debug_body.text = (
+		"Selected: %s (%s)\n"
+		+ "World: %.1f, %.1f\n"
+		+ "Cell: %d, %d\n"
+		+ "Terrain: %s  Road: %s  Blocked: %s\n"
+		+ "Path points: %d\n"
+		+ "Click map background to command movement."
+	) % [
+		str(entity["display_name"]),
+		str(entity["profile_id"]),
+		world_position.x,
+		world_position.y,
+		cell.x,
+		cell.y,
+		str(context["terrain"]),
+		str(context["has_road"]),
+		str(context["blocked"]),
+		path_points.size(),
+	]
+
+
 class MapCanvas extends Control:
 	var _main: Node
 	var _region_buttons: Dictionary = {}
-	var _overlay: Control
-
-	const REGION_POSITIONS: Dictionary = {
-		"silent_border":      Vector2(200, 30),
-		"blackbanner_camp":   Vector2(80,  130),
-		"ashen_pass":         Vector2(280, 180),
-		"hearthmere":         Vector2(200, 280),
-		"redglass_foothills": Vector2(340, 340),
-		"old_pine_road":      Vector2(120, 370),
-		"westmere_farms":     Vector2(60,  460),
-	}
-
-	const ROUTE_CONNECTIONS: Array = [
-		["silent_border",      "blackbanner_camp"],
-		["silent_border",      "ashen_pass"],
-		["blackbanner_camp",   "hearthmere"],
-		["ashen_pass",         "hearthmere"],
-		["ashen_pass",         "redglass_foothills"],
-		["hearthmere",         "old_pine_road"],
-		["old_pine_road",      "westmere_farms"],
-		["old_pine_road",      "redglass_foothills"],
-	]
-
-	const ROUTE_PATHS: Dictionary = {
-		"ashen_pass":    ["hearthmere", "ashen_pass",    "redglass_foothills"],
-		"old_pine_road": ["hearthmere", "old_pine_road", "redglass_foothills"],
-	}
 
 	func _draw() -> void:
-		for conn in ROUTE_CONNECTIONS:
-			var a: Vector2 = REGION_POSITIONS[conn[0]]
-			var b: Vector2 = REGION_POSITIONS[conn[1]]
-			draw_line(a, b, Color(0.5, 0.5, 0.5), 1.5)
+		_draw_terrain_grid()
+		_draw_current_path()
+		_draw_pois()
+		_draw_entities()
+
+
+	func _gui_input(event: InputEvent) -> void:
+		var mouse_button := event as InputEventMouseButton
+		if mouse_button == null:
+			return
+		if not mouse_button.pressed or mouse_button.button_index != MOUSE_BUTTON_LEFT:
+			return
+
+		var destination: Vector2 = StrategicMap.clamp_world_position(mouse_button.position)
+		var moved: bool = StrategicMap.command_selected_entity(destination)
+		if moved:
+			var context: Dictionary = StrategicMap.get_tactical_context(destination)
+			EventBus.add_event("[DEBUG] Move command: %s to %s cell %s." % [
+				StrategicMap.selected_entity_id,
+				str(context["context_type"]),
+				str(context["cell"]),
+			])
+			if _main:
+				_main._refresh_map_debug_panel()
+		else:
+			EventBus.add_event("[DEBUG] No valid path to selected map destination.")
+
+
+	func _draw_terrain_grid() -> void:
+		for y in range(StrategicMap.grid_size.y):
+			for x in range(StrategicMap.grid_size.x):
+				var cell := Vector2i(x, y)
+				var data: Dictionary = StrategicMap.get_cell_data(cell)
+				var rect := Rect2(
+					Vector2(float(x * StrategicMap.cell_size), float(y * StrategicMap.cell_size)),
+					Vector2(float(StrategicMap.cell_size), float(StrategicMap.cell_size))
+				)
+				draw_rect(rect, _terrain_color(str(data["terrain"]), bool(data["blocked"])))
+				if bool(data["has_road"]):
+					draw_rect(rect.grow(-12.0), Color(0.78, 0.66, 0.34, 0.9))
+				draw_rect(rect, Color(0.08, 0.08, 0.08, 0.35), false, 1.0)
+
+
+	func _terrain_color(terrain: String, blocked: bool) -> Color:
+		if blocked:
+			return Color(0.08, 0.08, 0.09, 0.95)
+		match terrain:
+			"forest":
+				return Color(0.18, 0.36, 0.22, 0.88)
+			"hills":
+				return Color(0.46, 0.38, 0.26, 0.88)
+			"mountain":
+				return Color(0.36, 0.36, 0.38, 0.88)
+			"water":
+				return Color(0.14, 0.32, 0.48, 0.88)
+			_:
+				return Color(0.30, 0.42, 0.28, 0.88)
+
+
+	func _draw_current_path() -> void:
+		if not StrategicMap.entities.has(StrategicMap.selected_entity_id):
+			return
+		var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
+		var points: Array = entity["path_points"]
+		if points.size() < 2:
+			return
+		for i in range(points.size() - 1):
+			var a: Vector2 = points[i] as Vector2
+			var b: Vector2 = points[i + 1] as Vector2
+			draw_line(a, b, Color(0.95, 0.95, 0.2), 3.0)
+
+
+	func _draw_pois() -> void:
+		var font: Font = get_theme_default_font()
+		for poi_id in StrategicMap.pois.keys():
+			var poi: Dictionary = StrategicMap.pois[poi_id]
+			var pos: Vector2 = poi["world_position"] as Vector2
+			var poi_type: String = str(poi["poi_type"])
+			var color: Color = Color(0.85, 0.85, 0.85)
+			if poi_type == "prospect":
+				color = Color(0.95, 0.45, 0.28)
+			elif poi_type == "settlement":
+				color = Color(0.32, 0.72, 1.0)
+			elif poi_type == "route_landmark":
+				color = Color(0.9, 0.76, 0.34)
+			draw_circle(pos, 5.0, color)
+			if poi_type == "prospect":
+				draw_string(font, pos + Vector2(8, -8), str(poi["display_name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11)
+
+
+	func _draw_entities() -> void:
+		var font: Font = get_theme_default_font()
+		for entity_id in StrategicMap.entities.keys():
+			var entity: Dictionary = StrategicMap.entities[entity_id]
+			var pos: Vector2 = entity["world_position"] as Vector2
+			var profile_id: String = str(entity["profile_id"])
+			var color: Color = Color(1.0, 0.86, 0.22)
+			if profile_id == "army":
+				color = Color(0.92, 0.22, 0.22)
+			if str(entity_id) == StrategicMap.selected_entity_id:
+				draw_circle(pos, 10.0, Color(1.0, 1.0, 1.0, 0.65))
+			draw_circle(pos, 7.0, color)
+			draw_string(font, pos + Vector2(10, 4), str(entity["display_name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12)
 
 	func setup(main: Node) -> void:
 		_main = main
@@ -958,7 +1094,7 @@ class MapCanvas extends Control:
 			btn.pressed.connect(main._select_region.bind(region_id))
 			add_child(btn)
 
-			var pos: Vector2 = REGION_POSITIONS.get(region_id, Vector2(200, 200))
+			var pos: Vector2 = StrategicMap.get_poi_world_position(region_id)
 			btn.position = pos - Vector2(55, 24)
 
 			_region_buttons[region_id] = btn
@@ -971,33 +1107,3 @@ class MapCanvas extends Control:
 			btn.text = GameState.regions[region_id]["name"]
 
 		queue_redraw()
-		if _overlay:
-			_overlay.queue_redraw()
-
-
-class ShipmentOverlay extends Control:
-	func _draw() -> void:
-		var shipments: Array = LogisticsSystem.active_shipments
-
-		for shipment in shipments:
-			var route_id: String = str(shipment["route"])
-			if not MapCanvas.ROUTE_PATHS.has(route_id):
-				continue
-
-			var path: Array = MapCanvas.ROUTE_PATHS[route_id]
-			var t: float = clampf(float(shipment["progress_hours"]) / float(shipment["total_hours"]), 0.0, 1.0)
-
-			var dot_pos: Vector2
-			if t < 0.5:
-				dot_pos = MapCanvas.REGION_POSITIONS[path[0]].lerp(MapCanvas.REGION_POSITIONS[path[1]], t * 2.0)
-			else:
-				dot_pos = MapCanvas.REGION_POSITIONS[path[1]].lerp(MapCanvas.REGION_POSITIONS[path[2]], (t - 0.5) * 2.0)
-
-			var cargo: Dictionary = shipment["cargo"]
-			var dot_color: Color = Color(1.0, 0.85, 0.2)
-			for good_key in cargo.keys():
-				if "ore" in str(good_key):
-					dot_color = Color(1.0, 0.5, 0.1)
-					break
-
-			draw_circle(dot_pos, 5.0, dot_color)

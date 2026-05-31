@@ -8,6 +8,13 @@
 
 config_version=5
 
+[application]
+
+config/name="Axiom Prototype"
+run/main_scene="uid://bnp8y0rft31qi"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+config/icon="res://icon.svg"
+
 [autoload]
 
 SimClock="*res://scripts/autoload/sim_clock.gd"
