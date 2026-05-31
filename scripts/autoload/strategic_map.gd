@@ -37,6 +37,18 @@ const MOVEMENT_PROFILES: Dictionary = {
 		},
 		"road_multiplier": 0.55,
 	},
+	"survey_party": {
+		"display_name": "Survey Party",
+		"world_units_per_sim_hour": 28.0,
+		"terrain_costs": {
+			"plains": 1.1,
+			"forest": 2.4,
+			"hills": 2.2,
+			"mountain": 4.5,
+			"water": -1.0,
+		},
+		"road_multiplier": 0.5,
+	},
 }
 
 var world_size: Vector2 = Vector2.ZERO
@@ -348,6 +360,27 @@ func estimate_path_hours(entity_id: String) -> int:
 		var a: Vector2 = points[i] as Vector2
 		var b: Vector2 = points[i + 1] as Vector2
 		distance += a.distance_to(b)
+	var world_units_per_sim_hour: float = maxf(float(entity["world_units_per_sim_hour"]), 1.0)
+	return max(1, int(ceil(distance / world_units_per_sim_hour)))
+
+
+func estimate_remaining_path_hours(entity_id: String) -> int:
+	if not entities.has(entity_id):
+		return 0
+	var entity: Dictionary = entities[entity_id]
+	var points: Array = entity["path_points"]
+	var path_index: int = int(entity["path_index"])
+	if points.is_empty() or path_index >= points.size():
+		return 0
+
+	var current_position: Vector2 = entity["world_position"] as Vector2
+	var distance: float = 0.0
+	var previous_position: Vector2 = current_position
+	for i in range(path_index, points.size()):
+		var point: Vector2 = points[i] as Vector2
+		distance += previous_position.distance_to(point)
+		previous_position = point
+
 	var world_units_per_sim_hour: float = maxf(float(entity["world_units_per_sim_hour"]), 1.0)
 	return max(1, int(ceil(distance / world_units_per_sim_hour)))
 

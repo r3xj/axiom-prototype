@@ -556,10 +556,7 @@ func _refresh_prospects_panel() -> void:
 
 		if status == "unsurveyed":
 			var button := Button.new()
-			button.text = "Survey %s (%s, 1 labor)" % [
-				prospect["name"],
-				_format_hours(int(prospect["survey_hours"])),
-			]
+			button.text = "Dispatch Survey Party: %s (1 labor)" % prospect["name"]
 			button.disabled = _get_unassigned_labor_teams() <= 0
 			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
@@ -1191,6 +1188,8 @@ class EntityOverlay extends Control:
 			var color: Color = Color(1.0, 0.86, 0.22)
 			if profile_id == "army":
 				color = Color(0.92, 0.22, 0.22)
+			elif profile_id == "survey_party":
+				color = Color(0.36, 0.95, 0.78)
 			if str(entity_id) == StrategicMap.selected_entity_id:
 				draw_circle(pos, 10.0, Color(1.0, 1.0, 1.0, 0.65))
 			draw_circle(pos, 7.0, color)

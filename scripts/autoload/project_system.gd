@@ -8,6 +8,7 @@ var active_projects: Array[Dictionary] = []
 
 func _ready() -> void:
 	SimClock.hour_advanced.connect(_on_hour_advanced)
+	StrategicMap.entity_arrived.connect(_on_strategic_entity_arrived)
 
 func _on_hour_advanced(_hour: int) -> void:
 	_advance_projects_for_one_hour()
@@ -38,21 +39,55 @@ func start_survey_project(prospect_id: String) -> void:
 	if prospect["status"] != "unsurveyed":
 		return
 
+	if not StrategicMap.pois.has(prospect_id):
+		EventBus.add_event("Cannot survey %s: no strategic map destination found." % str(prospect["name"]))
+		emit_signal("state_changed")
+		return
+
+	var entity_id: String = "survey_%s_%d" % [prospect_id, SimClock.game_hour]
+	var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
+	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
+	StrategicMap.create_entity(entity_id, "Survey Party: %s" % str(prospect["name"]), "survey_party", source_position)
+	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
+	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
+	if not path_assigned:
+		StrategicMap.remove_entity(entity_id)
+		EventBus.add_event("Cannot survey %s: no valid expedition path (%s)." % [
+			str(prospect["name"]),
+			str(path_debug.get("reason", "unknown")),
+		])
+		emit_signal("state_changed")
+		return
+
+	var estimated_hours: int = StrategicMap.estimate_path_hours(entity_id)
+	StrategicMap.set_entity_metadata(entity_id, {
+		"kind": "survey_expedition",
+		"project_id": "survey_%s" % prospect_id,
+		"prospect_id": prospect_id,
+	})
+
 	prospect["status"] = "surveying"
 	GameState.prospects[prospect_id] = prospect
 
 	var project: Dictionary = {
 		"id": "survey_%s" % prospect_id,
-		"type": "survey",
+		"type": "survey_expedition",
 		"target_id": prospect_id,
-		"title": "Survey: %s" % prospect["name"],
-		"remaining_hours": int(prospect["survey_hours"]),
-		"total_hours": int(prospect["survey_hours"]),
+		"entity_id": entity_id,
+		"title": "Survey Expedition: %s" % prospect["name"],
+		"remaining_hours": estimated_hours,
+		"total_hours": estimated_hours,
 		"labor_teams": 1,
+		"uses_strategic_entity": true,
 	}
 	active_projects.append(project)
 
-	EventBus.add_event("Survey started: %s." % prospect["name"])
+	EventBus.add_event("[DEBUG] Survey expedition path assigned: %s path=%d eta=%s." % [
+		str(prospect["name"]),
+		int(path_debug.get("path_length", 0)),
+		"%dh" % estimated_hours,
+	])
+	EventBus.add_event("Survey expedition dispatched: %s." % prospect["name"])
 	emit_signal("state_changed")
 
 func start_establish_mine_project(prospect_id: String) -> void:
@@ -108,6 +143,12 @@ func force_complete_top_project() -> void:
 func _advance_projects_for_one_hour() -> void:
 	for i in range(active_projects.size() - 1, -1, -1):
 		var project: Dictionary = active_projects[i]
+		if bool(project.get("uses_strategic_entity", false)):
+			var entity_id: String = str(project.get("entity_id", ""))
+			project["remaining_hours"] = StrategicMap.estimate_remaining_path_hours(entity_id)
+			active_projects[i] = project
+			continue
+
 		var hourly_supply_cost: float = float(project.get("hourly_supply_cost", 0.0))
 
 		if hourly_supply_cost > 0.0:
@@ -134,6 +175,9 @@ func _complete_project(project: Dictionary) -> void:
 
 	if project_type == "survey":
 		_complete_survey_project(str(project["target_id"]))
+	elif project_type == "survey_expedition":
+		StrategicMap.remove_entity(str(project.get("entity_id", "")))
+		_complete_survey_project(str(project["target_id"]))
 	elif project_type == "establish_mine":
 		_complete_establish_mine_project(str(project["target_id"]))
 	elif project_type == "analyze_material":
@@ -142,6 +186,27 @@ func _complete_project(project: Dictionary) -> void:
 		_complete_forge_project(project)
 	else:
 		EventBus.add_event("Project completed: %s." % str(project["title"]))
+
+
+func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> void:
+	if str(metadata.get("kind", "")) != "survey_expedition":
+		return
+
+	var prospect_id: String = str(metadata.get("prospect_id", ""))
+	var project_id: String = str(metadata.get("project_id", ""))
+	for i in range(active_projects.size() - 1, -1, -1):
+		var project: Dictionary = active_projects[i]
+		if str(project.get("id", "")) != project_id:
+			continue
+		if str(project.get("entity_id", "")) != entity_id:
+			continue
+
+		active_projects.remove_at(i)
+		StrategicMap.remove_entity(entity_id)
+		EventBus.add_event("[DEBUG] Survey expedition arrived: %s." % prospect_id)
+		_complete_survey_project(prospect_id)
+		emit_signal("state_changed")
+		return
 
 func start_forge_project(output_type: String, material_inputs: Dictionary) -> void:
 	var forge_outputs: Dictionary = ScenarioData.get_forge_outputs()
