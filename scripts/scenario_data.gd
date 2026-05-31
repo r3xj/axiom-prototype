@@ -159,8 +159,8 @@ const REGIONS: Dictionary = {
 		"available_actions": [
 			"Inspect prospect leads",
 			"Begin survey project",
-			"Claim confirmed deposit later",
-			"Establish mine after claim later",
+			"Dispatch Field Crew to confirmed deposit",
+			"Establish mine after survey confirmation",
 		],
 	},
 	"ashen_pass": {
