@@ -1801,11 +1801,12 @@ class EntityOverlay extends Control:
 			return
 		var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
 		var points: Array = entity["path_points"]
-		if points.is_empty():
+		var path_index: int = int(entity.get("path_index", 0))
+		if points.is_empty() or path_index >= points.size():
 			return
 		var display_points: Array[Vector2] = [entity["world_position"] as Vector2]
-		for point_variant in points:
-			display_points.append(point_variant as Vector2)
+		for i in range(path_index, points.size()):
+			display_points.append(points[i] as Vector2)
 		for i in range(display_points.size() - 1):
 			var a: Vector2 = display_points[i]
 			var b: Vector2 = display_points[i + 1]
