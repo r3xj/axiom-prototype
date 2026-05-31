@@ -23,6 +23,7 @@ var map_debug_body: Label
 
 var region_buttons: Dictionary = {}
 var _map_canvas: MapCanvas
+var _entity_overlay: EntityOverlay
 
 
 func _ready() -> void:
@@ -53,6 +54,8 @@ func _on_hours_advanced() -> void:
 func _on_strategic_map_changed() -> void:
 	if _map_canvas:
 		_map_canvas.queue_redraw()
+	if _entity_overlay:
+		_entity_overlay.queue_redraw()
 	if map_debug_body:
 		_refresh_map_debug_panel()
 
@@ -149,7 +152,15 @@ func _build_map_panel(parent: Control) -> void:
 	map_content.add_child(canvas)
 	canvas.setup(self)
 
+	var entity_overlay := EntityOverlay.new()
+	entity_overlay.name = "EntityOverlay"
+	entity_overlay.mouse_filter = Control.MOUSE_FILTER_PASS
+	canvas.add_child(entity_overlay)
+	entity_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	entity_overlay.setup(self)
+
 	_map_canvas = canvas
+	_entity_overlay = entity_overlay
 
 
 func _build_side_panel(parent: Control) -> void:
@@ -938,6 +949,8 @@ func _debug_select_map_entity(entity_id: String) -> void:
 	_refresh_map_debug_panel()
 	if _map_canvas:
 		_map_canvas.queue_redraw()
+	if _entity_overlay:
+		_entity_overlay.queue_redraw()
 
 
 func _refresh_map_debug_panel() -> void:
@@ -980,9 +993,7 @@ class MapCanvas extends Control:
 
 	func _draw() -> void:
 		_draw_terrain_grid()
-		_draw_current_path()
 		_draw_pois()
-		_draw_entities()
 
 
 	func _gui_input(event: InputEvent) -> void:
@@ -1038,19 +1049,6 @@ class MapCanvas extends Control:
 				return Color(0.30, 0.42, 0.28, 0.88)
 
 
-	func _draw_current_path() -> void:
-		if not StrategicMap.entities.has(StrategicMap.selected_entity_id):
-			return
-		var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
-		var points: Array = entity["path_points"]
-		if points.size() < 2:
-			return
-		for i in range(points.size() - 1):
-			var a: Vector2 = points[i] as Vector2
-			var b: Vector2 = points[i + 1] as Vector2
-			draw_line(a, b, Color(0.95, 0.95, 0.2), 3.0)
-
-
 	func _draw_pois() -> void:
 		var font: Font = get_theme_default_font()
 		for poi_id in StrategicMap.pois.keys():
@@ -1067,21 +1065,6 @@ class MapCanvas extends Control:
 			draw_circle(pos, 5.0, color)
 			if poi_type == "prospect":
 				draw_string(font, pos + Vector2(8, -8), str(poi["display_name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11)
-
-
-	func _draw_entities() -> void:
-		var font: Font = get_theme_default_font()
-		for entity_id in StrategicMap.entities.keys():
-			var entity: Dictionary = StrategicMap.entities[entity_id]
-			var pos: Vector2 = entity["world_position"] as Vector2
-			var profile_id: String = str(entity["profile_id"])
-			var color: Color = Color(1.0, 0.86, 0.22)
-			if profile_id == "army":
-				color = Color(0.92, 0.22, 0.22)
-			if str(entity_id) == StrategicMap.selected_entity_id:
-				draw_circle(pos, 10.0, Color(1.0, 1.0, 1.0, 0.65))
-			draw_circle(pos, 7.0, color)
-			draw_string(font, pos + Vector2(10, 4), str(entity["display_name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12)
 
 	func setup(main: Node) -> void:
 		_main = main
@@ -1107,3 +1090,81 @@ class MapCanvas extends Control:
 			btn.text = GameState.regions[region_id]["name"]
 
 		queue_redraw()
+
+
+class EntityOverlay extends Control:
+	const ENTITY_HIT_RADIUS: float = 12.0
+
+	var _main: Node
+
+	func setup(main: Node) -> void:
+		_main = main
+
+
+	func _has_point(point: Vector2) -> bool:
+		return not _get_entity_at_position(point).is_empty()
+
+
+	func _draw() -> void:
+		_draw_current_path()
+		_draw_entities()
+
+
+	func _gui_input(event: InputEvent) -> void:
+		var mouse_button := event as InputEventMouseButton
+		if mouse_button == null:
+			return
+		if not mouse_button.pressed or mouse_button.button_index != MOUSE_BUTTON_LEFT:
+			return
+
+		var entity_id: String = _get_entity_at_position(mouse_button.position)
+		if entity_id.is_empty():
+			return
+
+		StrategicMap.select_entity(entity_id)
+		EventBus.add_event("[DEBUG] Selected strategic entity: %s." % entity_id)
+		if _main:
+			_main._refresh_map_debug_panel()
+		get_viewport().set_input_as_handled()
+		queue_redraw()
+
+
+	func _draw_current_path() -> void:
+		if not StrategicMap.entities.has(StrategicMap.selected_entity_id):
+			return
+		var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
+		var points: Array = entity["path_points"]
+		if points.size() < 2:
+			return
+		for i in range(points.size() - 1):
+			var a: Vector2 = points[i] as Vector2
+			var b: Vector2 = points[i + 1] as Vector2
+			draw_line(a, b, Color(0.95, 0.95, 0.2), 3.0)
+
+
+	func _draw_entities() -> void:
+		var font: Font = get_theme_default_font()
+		for entity_id in StrategicMap.entities.keys():
+			var entity: Dictionary = StrategicMap.entities[entity_id]
+			var pos: Vector2 = entity["world_position"] as Vector2
+			var profile_id: String = str(entity["profile_id"])
+			var color: Color = Color(1.0, 0.86, 0.22)
+			if profile_id == "army":
+				color = Color(0.92, 0.22, 0.22)
+			if str(entity_id) == StrategicMap.selected_entity_id:
+				draw_circle(pos, 10.0, Color(1.0, 1.0, 1.0, 0.65))
+			draw_circle(pos, 7.0, color)
+			draw_string(font, pos + Vector2(10, 4), str(entity["display_name"]), HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12)
+
+
+	func _get_entity_at_position(world_position: Vector2) -> String:
+		var best_entity_id: String = ""
+		var best_distance: float = ENTITY_HIT_RADIUS
+		for entity_id in StrategicMap.entities.keys():
+			var entity: Dictionary = StrategicMap.entities[entity_id]
+			var entity_position: Vector2 = entity["world_position"] as Vector2
+			var distance: float = world_position.distance_to(entity_position)
+			if distance <= best_distance:
+				best_distance = distance
+				best_entity_id = str(entity_id)
+		return best_entity_id
