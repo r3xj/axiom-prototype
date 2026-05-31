@@ -1044,34 +1044,25 @@ func _get_field_crew_site_text(entity: Dictionary, metadata: Dictionary) -> Stri
 func _format_shipment_activity(shipment: Dictionary) -> String:
 	var source_id: String = str(shipment.get("source", ""))
 	var destination_id: String = str(shipment.get("destination", ""))
-	var route_id: String = str(shipment.get("route", ""))
 	var source_name: String = LogisticsSystem.get_location_name(source_id)
 	var destination_name: String = LogisticsSystem.get_location_name(destination_id)
-	var route_name: String = str(LogisticsSystem.ROUTES.get(route_id, {}).get("name", route_id))
+	var plan_name: String = LogisticsSystem.get_shipment_plan_name(shipment)
 	var cargo: Dictionary = shipment.get("cargo", {}) as Dictionary
 	var cargo_summary: String = _format_cargo_summary(cargo)
-	var remaining_hours: int = _get_shipment_remaining_hours(shipment)
-	var status_text: String = "In transit"
-	if not bool(shipment.get("uses_strategic_entity", false)):
-		status_text = "Compatibility timer fallback"
+	var remaining_hours: int = LogisticsSystem.get_shipment_remaining_hours(shipment)
+	var status_text: String = LogisticsSystem.get_shipment_status_text(shipment)
+	var progress_text: String = LogisticsSystem.get_shipment_progress_text(shipment)
 
-	return "%s Caravan: %s -> %s, Plan: %s, %s, ETA ~%s" % [
+	return "%s Caravan: %s -> %s, Plan: %s, %s, %s, ETA ~%s, %s" % [
 		cargo_summary,
 		source_name,
 		destination_name,
-		route_name,
+		plan_name,
 		status_text,
+		progress_text,
 		_format_hours(remaining_hours),
+		str(shipment.get("id", "")),
 	]
-
-
-func _get_shipment_remaining_hours(shipment: Dictionary) -> int:
-	if bool(shipment.get("uses_strategic_entity", false)):
-		var entity_id: String = str(shipment.get("entity_id", ""))
-		return StrategicMap.estimate_remaining_path_hours(entity_id)
-	var total_hours: int = int(shipment.get("total_hours", 0))
-	var progress_hours: int = int(shipment.get("progress_hours", 0))
-	return max(0, total_hours - progress_hours)
 
 
 func _format_cargo_summary(cargo: Dictionary) -> String:

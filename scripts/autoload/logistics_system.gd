@@ -19,6 +19,7 @@ const SHIPMENT_SUPPLY_AMOUNT: float = 20.0
 const SHIPMENT_ORE_AMOUNT: float = 20.0
 
 var active_shipments: Array[Dictionary] = []
+var _next_shipment_serial: int = 1
 
 func _ready() -> void:
 	SimClock.hour_advanced.connect(_on_hour_advanced)
@@ -47,6 +48,45 @@ func get_location_name(location_id: String) -> String:
 	if GameState.prospects.has(location_id):
 		return str(GameState.prospects[location_id]["name"])
 	return location_id
+
+
+func get_shipment_plan_name(shipment: Dictionary) -> String:
+	var plan_id: String = str(shipment.get("shipment_plan_id", shipment.get("route", "")))
+	var plan: Dictionary = ROUTES.get(plan_id, {}) as Dictionary
+	return str(plan.get("name", plan_id))
+
+
+func is_shipment_using_strategic_entity(shipment: Dictionary) -> bool:
+	if not bool(shipment.get("uses_strategic_entity", false)):
+		return false
+	var entity_id: String = str(shipment.get("entity_id", ""))
+	return not entity_id.is_empty() and StrategicMap.entities.has(entity_id)
+
+
+func get_shipment_remaining_hours(shipment: Dictionary) -> int:
+	if is_shipment_using_strategic_entity(shipment):
+		var entity_id: String = str(shipment.get("entity_id", ""))
+		return StrategicMap.estimate_remaining_path_hours(entity_id)
+
+	var total_hours: int = int(shipment.get("total_hours", 0))
+	var progress_hours: int = int(shipment.get("progress_hours", 0))
+	return max(0, total_hours - progress_hours)
+
+
+func get_shipment_status_text(shipment: Dictionary) -> String:
+	if is_shipment_using_strategic_entity(shipment):
+		return "Strategic movement"
+	if bool(shipment.get("uses_strategic_entity", false)):
+		return "Missing caravan; timer fallback"
+	return "Timer fallback"
+
+
+func get_shipment_progress_text(shipment: Dictionary) -> String:
+	var total_hours: int = int(shipment.get("total_hours", 0))
+	var progress_hours: int = int(shipment.get("progress_hours", 0))
+	if is_shipment_using_strategic_entity(shipment):
+		progress_hours = max(0, total_hours - get_shipment_remaining_hours(shipment))
+	return "%dh/%dh" % [clampi(progress_hours, 0, max(0, total_hours)), max(0, total_hours)]
 
 
 func _build_shipment_title(cargo: Dictionary, destination_id: String) -> String:
@@ -82,15 +122,18 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 		StockpileSystem.adjust_good_amount(source_stockpile, str(good_key), -float(cargo[good_key]))
 
 	var route: Dictionary = ROUTES[route_id]
-	var shipment_id: String = "shipment_%d" % (active_shipments.size() + 1)
+	var shipment_id: String = "shipment_%d" % _next_shipment_serial
+	_next_shipment_serial += 1
 	var entity_id: String = "entity_%s" % shipment_id
 	var source_position: Vector2 = _get_world_position_for_location(source_id)
 	var destination_position: Vector2 = _get_world_position_for_location(destination_id)
+	var shipment_cargo: Dictionary = cargo.duplicate(true)
 	StrategicMap.create_entity(entity_id, "Shipment Caravan", "caravan", source_position)
 	# Compatibility fallback ETA if the strategic caravan cannot path.
 	var total_hours: int = int(route["travel_hours"])
 	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
 	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
+	var movement_mode: String = "strategic_entity" if path_assigned else "fallback_timer"
 	if path_assigned:
 		total_hours = StrategicMap.estimate_path_hours(entity_id)
 		StrategicMap.set_entity_metadata(entity_id, {
@@ -100,9 +143,12 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 			"destination_id": destination_id,
 			"shipment_plan_id": route_id,
 			"shipment_plan_name": str(route["name"]),
+			"movement_mode": movement_mode,
+			"cargo": shipment_cargo.duplicate(true),
 		})
 	else:
 		StrategicMap.remove_entity(entity_id)
+		entity_id = ""
 		EventBus.add_event("[DEBUG] Shipment caravan path failed; falling back to route timer.")
 	EventBus.add_event("[DEBUG] Shipment caravan path assigned=%s reason=%s path=%d." % [
 		str(path_assigned),
@@ -117,7 +163,12 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 		"source": source_id,
 		"destination": destination_id,
 		"route": route_id,
-		"cargo": cargo,
+		"shipment_plan_id": route_id,
+		"shipment_plan_name": str(route["name"]),
+		"movement_mode": movement_mode,
+		"path_failure_reason": "" if path_assigned else str(path_debug.get("reason", "unknown")),
+		"path_cell_count": int(path_debug.get("path_length", 0)),
+		"cargo": shipment_cargo,
 		"title": _build_shipment_title(cargo, destination_id),
 		"progress_hours": 0,
 		"total_hours": total_hours,
@@ -136,6 +187,13 @@ func _advance_shipments_for_one_hour() -> void:
 	for i in range(active_shipments.size() - 1, -1, -1):
 		var shipment: Dictionary = active_shipments[i]
 		if bool(shipment.get("uses_strategic_entity", false)):
+			if not is_shipment_using_strategic_entity(shipment):
+				shipment["uses_strategic_entity"] = false
+				shipment["movement_mode"] = "fallback_timer"
+				shipment["entity_id"] = ""
+				EventBus.add_event("[DEBUG] Shipment strategic entity missing; continuing with timer fallback: %s." % str(shipment.get("id", "")))
+				active_shipments[i] = shipment
+				continue
 			_update_strategic_shipment_progress(shipment)
 			active_shipments[i] = shipment
 			continue
@@ -199,36 +257,8 @@ func _complete_shipment(shipment: Dictionary) -> void:
 func _update_strategic_shipment_progress(shipment: Dictionary) -> void:
 	var entity_id: String = str(shipment.get("entity_id", ""))
 	shipment["world_position"] = _get_entity_world_position(entity_id)
-	shipment["progress_hours"] = _get_entity_elapsed_travel_hours(entity_id)
-
-
-func _get_entity_elapsed_travel_hours(entity_id: String) -> int:
-	if not StrategicMap.entities.has(entity_id):
-		return 0
-
-	var entity: Dictionary = StrategicMap.entities[entity_id]
-	var path_index: int = int(entity["path_index"])
-	var path_points: Array = entity["path_points"]
-	var world_position: Vector2 = entity["world_position"] as Vector2
-	var traveled_distance: float = 0.0
-
-	if path_points.is_empty():
-		return int(StrategicMap.estimate_path_hours(entity_id))
-
-	if path_index > 0:
-		var previous_position: Vector2 = path_points[0] as Vector2
-		for i in range(1, mini(path_index, path_points.size())):
-			var path_position: Vector2 = path_points[i] as Vector2
-			traveled_distance += previous_position.distance_to(path_position)
-			previous_position = path_position
-		if path_index < path_points.size():
-			traveled_distance += previous_position.distance_to(world_position)
-	else:
-		var first_position: Vector2 = path_points[0] as Vector2
-		traveled_distance = maxf(0.0, first_position.distance_to(world_position))
-
-	var movement_rate: float = maxf(float(entity["world_units_per_sim_hour"]), 1.0)
-	return int(floor(traveled_distance / movement_rate))
+	var total_hours: int = int(shipment.get("total_hours", 0))
+	shipment["progress_hours"] = max(0, total_hours - get_shipment_remaining_hours(shipment))
 
 
 func _get_world_position_for_location(location_id: String) -> Vector2:
