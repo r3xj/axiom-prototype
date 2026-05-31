@@ -236,8 +236,7 @@ func command_entity_to_world_position(entity_id: String, destination_world_posit
 		_log_caravan_path_debug(entity_id, profile_id, entity_position, destination_world_position, start_cell, goal_cell, path_cells, false)
 		return false
 
-	var path_points: Array[Vector2] = cells_to_world_path(path_cells)
-	path_points[path_points.size() - 1] = clamp_world_position(destination_world_position)
+	var path_points: Array[Vector2] = cells_to_world_path(path_cells, entity_position, destination_world_position)
 	entity["target_world_position"] = clamp_world_position(destination_world_position)
 	entity["path_points"] = path_points
 	entity["path_index"] = 0
@@ -380,10 +379,21 @@ func get_cell_debug_info(world_position: Vector2) -> Dictionary:
 	}
 
 
-func cells_to_world_path(path_cells: Array[Vector2i]) -> Array[Vector2]:
+func cells_to_world_path(path_cells: Array[Vector2i], start_world_position: Vector2, destination_world_position: Vector2) -> Array[Vector2]:
 	var points: Array[Vector2] = []
-	for cell in path_cells:
+	if path_cells.is_empty():
+		return points
+
+	var clamped_destination: Vector2 = clamp_world_position(destination_world_position)
+	if path_cells.size() == 1:
+		if start_world_position.distance_to(clamped_destination) > 0.001:
+			points.append(clamped_destination)
+		return points
+
+	for i in range(1, path_cells.size()):
+		var cell: Vector2i = path_cells[i]
 		points.append(cell_to_world_center(cell))
+	points[points.size() - 1] = clamped_destination
 	return points
 
 
@@ -401,13 +411,16 @@ func estimate_path_hours(entity_id: String) -> int:
 		return 0
 	var entity: Dictionary = entities[entity_id]
 	var points: Array = entity["path_points"]
-	if points.size() < 2:
+	if points.is_empty():
 		return 0
 	var distance: float = 0.0
-	for i in range(points.size() - 1):
-		var a: Vector2 = points[i] as Vector2
-		var b: Vector2 = points[i + 1] as Vector2
-		distance += a.distance_to(b)
+	var previous_position: Vector2 = entity["world_position"] as Vector2
+	for point_variant in points:
+		var point: Vector2 = point_variant as Vector2
+		distance += previous_position.distance_to(point)
+		previous_position = point
+	if distance <= 0.001:
+		return 0
 	var world_units_per_sim_hour: float = maxf(float(entity["world_units_per_sim_hour"]), 1.0)
 	return max(1, int(ceil(distance / world_units_per_sim_hour)))
 
