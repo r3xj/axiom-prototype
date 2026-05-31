@@ -37,21 +37,9 @@ const MOVEMENT_PROFILES: Dictionary = {
 		},
 		"road_multiplier": 0.55,
 	},
-	"survey_party": {
-		"display_name": "Survey Party",
-		"world_units_per_sim_hour": 28.0,
-		"terrain_costs": {
-			"plains": 1.1,
-			"forest": 2.4,
-			"hills": 2.2,
-			"mountain": 4.5,
-			"water": -1.0,
-		},
-		"road_multiplier": 0.5,
-	},
-	"work_crew": {
-		"display_name": "Work Crew",
-		"world_units_per_sim_hour": 24.0,
+	"field_crew": {
+		"display_name": "Field Crew",
+		"world_units_per_sim_hour": 26.0,
 		"terrain_costs": {
 			"plains": 1.2,
 			"forest": 2.8,
@@ -360,7 +348,7 @@ func get_cell_debug_info(world_position: Vector2) -> Dictionary:
 	var cell: Vector2i = world_to_cell(world_position)
 	var data: Dictionary = get_cell_data(cell)
 	var profile_costs: Dictionary = {}
-	var profile_ids: Array[String] = ["caravan", "army", "survey_party", "work_crew"]
+	var profile_ids: Array[String] = ["caravan", "army", "field_crew"]
 	for profile_id in profile_ids:
 		profile_costs[profile_id] = get_cell_cost(cell, profile_id)
 

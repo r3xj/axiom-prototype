@@ -219,6 +219,7 @@ func _build_side_panel(parent: Control) -> void:
 	_build_prospects_panel(side_panel)
 	_build_codex_panel(side_panel)
 	_build_economy_panel(side_panel)
+	_build_selected_entity_panel(side_panel)
 	_build_projects_panel(side_panel)
 	_build_shipments_panel(side_panel)
 	_build_event_log_panel(side_panel)
@@ -334,6 +335,32 @@ func _build_projects_panel(parent: Control) -> void:
 	projects_body.text = ""
 	projects_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	projects_content.add_child(projects_body)
+
+
+func _build_selected_entity_panel(parent: Control) -> void:
+	var selected_panel := PanelContainer.new()
+	selected_panel.name = "SelectedEntityPanel"
+	parent.add_child(selected_panel)
+
+	var selected_content := VBoxContainer.new()
+	selected_content.name = "SelectedEntityContent"
+	selected_content.add_theme_constant_override("separation", 8)
+	selected_panel.add_child(selected_content)
+
+	var selected_title := Label.new()
+	selected_title.text = "Selected Entity"
+	selected_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	selected_content.add_child(selected_title)
+
+	selected_entity_body = Label.new()
+	selected_entity_body.text = ""
+	selected_entity_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	selected_content.add_child(selected_entity_body)
+
+	selected_entity_actions_box = VBoxContainer.new()
+	selected_entity_actions_box.name = "SelectedEntityActions"
+	selected_entity_actions_box.add_theme_constant_override("separation", 6)
+	selected_content.add_child(selected_entity_actions_box)
 
 
 func _build_shipments_panel(parent: Control) -> void:
@@ -565,13 +592,13 @@ func _refresh_prospects_panel() -> void:
 
 		if status == "unsurveyed":
 			var button := Button.new()
-			button.text = "Dispatch Survey Party: %s (1 labor)" % prospect["name"]
+			button.text = "Dispatch Field Crew to Survey: %s (1 labor)" % prospect["name"]
 			button.disabled = _get_unassigned_labor_teams() <= 0
 			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
 			var button := Button.new()
-			button.text = "Dispatch Mine Work Crew: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
+			button.text = "Dispatch Field Crew to Establish Mine: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
 			button.disabled = _get_unassigned_labor_teams() < 2
 			button.pressed.connect(ProjectSystem.start_establish_mine_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
@@ -706,7 +733,7 @@ func _format_project_activity(project: Dictionary) -> String:
 
 	if project_type == "survey_expedition":
 		if project_state == "traveling_to_site":
-			return "Survey Party -> %s: Traveling, ETA ~%s (%s)" % [
+			return "Field Crew -> %s: Traveling to survey, ETA ~%s (%s)" % [
 				target_name,
 				_format_hours(remaining_hours),
 				labor_text,
@@ -720,7 +747,7 @@ func _format_project_activity(project: Dictionary) -> String:
 
 	if project_type == "establish_mine":
 		if project_state == "traveling_to_site":
-			return "Mine Work Crew -> %s: Traveling, ETA ~%s (%s)" % [
+			return "Field Crew -> %s: Traveling to build, ETA ~%s (%s)" % [
 				target_name,
 				_format_hours(remaining_hours),
 				labor_text,
@@ -1030,20 +1057,6 @@ func _build_debug_panel(parent: Control) -> void:
 	map_label.text = "— Strategic Map —"
 	debug_content.add_child(map_label)
 
-	var selected_label := Label.new()
-	selected_label.text = "Selected Entity"
-	debug_content.add_child(selected_label)
-
-	selected_entity_body = Label.new()
-	selected_entity_body.text = ""
-	selected_entity_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	debug_content.add_child(selected_entity_body)
-
-	selected_entity_actions_box = VBoxContainer.new()
-	selected_entity_actions_box.name = "SelectedEntityActions"
-	selected_entity_actions_box.add_theme_constant_override("separation", 6)
-	debug_content.add_child(selected_entity_actions_box)
-
 	var btn_caravan := Button.new()
 	btn_caravan.text = "[D] Select Caravan"
 	btn_caravan.pressed.connect(_debug_select_map_entity.bind("debug_caravan"))
@@ -1146,22 +1159,22 @@ func _refresh_selected_entity_actions() -> void:
 		return
 
 	_clear_container_children(selected_entity_actions_box)
-	if not _is_selected_idle_work_crew():
+	if not _is_selected_idle_field_crew():
 		return
 
 	var disband_button := Button.new()
-	disband_button.text = "Disband Work Crew"
-	disband_button.pressed.connect(_disband_selected_idle_work_crew)
+	disband_button.text = "Disband Field Crew"
+	disband_button.pressed.connect(_disband_selected_idle_field_crew)
 	selected_entity_actions_box.add_child(disband_button)
 
 
-func _is_selected_idle_work_crew() -> bool:
+func _is_selected_idle_field_crew() -> bool:
 	var entity_id: String = StrategicMap.selected_entity_id
 	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
 		return false
 
 	var entity: Dictionary = StrategicMap.entities[entity_id]
-	if str(entity.get("profile_id", "")) != "work_crew":
+	if str(entity.get("profile_id", "")) != "field_crew":
 		return false
 	if not _find_project_for_entity(entity_id).is_empty():
 		return false
@@ -1174,13 +1187,13 @@ func _is_selected_idle_work_crew() -> bool:
 	return str(metadata.get("state", "")) == "idle"
 
 
-func _disband_selected_idle_work_crew() -> void:
-	if not _is_selected_idle_work_crew():
+func _disband_selected_idle_field_crew() -> void:
+	if not _is_selected_idle_field_crew():
 		return
 
 	var entity_id: String = StrategicMap.selected_entity_id
 	StrategicMap.remove_entity(entity_id)
-	EventBus.add_event("Work crew disbanded. Prototype note: no population or labor totals changed.")
+	EventBus.add_event("Field crew disbanded. Prototype note: no population or labor totals changed.")
 	_refresh_all_ui()
 
 
@@ -1329,13 +1342,13 @@ func _find_shipment_for_entity(entity_id: String, metadata: Dictionary) -> Dicti
 	return {}
 
 
-func _mark_selected_idle_work_crew_moving(destination: Vector2) -> void:
+func _mark_selected_idle_field_crew_moving(destination: Vector2) -> void:
 	var entity_id: String = StrategicMap.selected_entity_id
 	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
 		return
 
 	var entity: Dictionary = StrategicMap.entities[entity_id]
-	if str(entity.get("profile_id", "")) != "work_crew":
+	if str(entity.get("profile_id", "")) != "field_crew":
 		return
 
 	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
@@ -1346,9 +1359,10 @@ func _mark_selected_idle_work_crew_moving(destination: Vector2) -> void:
 
 	metadata.erase("site_id")
 	metadata.erase("site_name")
+	metadata.erase("prospect_id")
 	metadata["last_order"] = "move"
 	StrategicMap.set_entity_metadata(entity_id, metadata)
-	EventBus.add_event("Idle work crew moving to %.0f, %.0f." % [destination.x, destination.y])
+	EventBus.add_event("Idle field crew moving to %.0f, %.0f." % [destination.x, destination.y])
 
 
 func _format_hover_inspector() -> String:
@@ -1383,7 +1397,7 @@ func _format_hover_inspector() -> String:
 
 
 func _format_profile_costs(profile_costs: Dictionary) -> String:
-	var profile_ids: Array[String] = ["caravan", "army", "survey_party", "work_crew"]
+	var profile_ids: Array[String] = ["caravan", "army", "field_crew"]
 	var parts: Array[String] = []
 	for profile_id in profile_ids:
 		var cost: float = float(profile_costs.get(profile_id, -1.0))
@@ -1425,7 +1439,7 @@ class MapCanvas extends Control:
 		var moved: bool = StrategicMap.command_selected_entity(destination)
 		if moved:
 			if _main:
-				_main._mark_selected_idle_work_crew_moving(destination)
+				_main._mark_selected_idle_field_crew_moving(destination)
 			var context: Dictionary = StrategicMap.get_tactical_context(destination)
 			EventBus.add_event("[DEBUG] Move command: %s to %s cell %s." % [
 				StrategicMap.selected_entity_id,
@@ -1587,9 +1601,7 @@ class EntityOverlay extends Control:
 			var color: Color = Color(1.0, 0.86, 0.22)
 			if profile_id == "army":
 				color = Color(0.92, 0.22, 0.22)
-			elif profile_id == "survey_party":
-				color = Color(0.36, 0.95, 0.78)
-			elif profile_id == "work_crew":
+			elif profile_id == "field_crew":
 				color = Color(0.47, 0.58, 1.0)
 			if str(entity_id) == StrategicMap.selected_entity_id:
 				draw_circle(pos, 10.0, Color(1.0, 1.0, 1.0, 0.65))
