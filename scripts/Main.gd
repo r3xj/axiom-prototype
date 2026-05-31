@@ -71,8 +71,6 @@ func _on_strategic_map_changed() -> void:
 		_refresh_selected_entity_panel()
 	if selected_entity_actions_box:
 		_refresh_selected_entity_actions()
-	if field_crew_list_box:
-		_refresh_field_crews_panel()
 	if map_debug_body:
 		_refresh_map_debug_panel()
 
@@ -811,7 +809,6 @@ func _refresh_field_crews_panel() -> void:
 		var select_button := Button.new()
 		select_button.text = "Select"
 		select_button.custom_minimum_size = Vector2(64, 0)
-		select_button.disabled = entity_id == StrategicMap.selected_entity_id
 		select_button.pressed.connect(_select_field_crew_from_list.bind(entity_id))
 		row.add_child(select_button)
 
@@ -1350,7 +1347,7 @@ func _refresh_selected_entity_actions() -> void:
 		return
 
 	var disband_button := Button.new()
-	disband_button.text = "Disband Field Crew"
+	disband_button.text = "Return & Disband Field Crew"
 	disband_button.pressed.connect(_disband_selected_idle_field_crew)
 	selected_entity_actions_box.add_child(disband_button)
 
@@ -1379,9 +1376,34 @@ func _disband_selected_idle_field_crew() -> void:
 		return
 
 	var entity_id: String = StrategicMap.selected_entity_id
-	StrategicMap.remove_entity(entity_id)
-	GameState.release_field_crew_labor()
-	EventBus.add_event("Field crew disbanded. 1 labor team returned to the unassigned pool.")
+	var hearthmere_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	var crew_position: Vector2 = entity["world_position"] as Vector2
+	var previous_display_name: String = str(entity.get("display_name", "Field Crew"))
+	if crew_position.distance_to(hearthmere_position) <= ProjectSystem.FIELD_CREW_SITE_RADIUS:
+		StrategicMap.remove_entity(entity_id)
+		GameState.release_field_crew_labor()
+		EventBus.add_event("Field crew disbanded at Hearthmere. 1 labor team returned to the unassigned pool.")
+		_refresh_all_ui()
+		return
+
+	var previous_metadata: Dictionary = (entity.get("metadata", {}) as Dictionary).duplicate(true)
+	StrategicMap.set_entity_metadata(entity_id, {
+		"kind": "field_crew",
+		"state": "returning_to_disband",
+		"destination_id": "hearthmere",
+	})
+	StrategicMap.set_entity_display_name(entity_id, "Field Crew: Returning to Hearthmere")
+	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, hearthmere_position)
+	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, hearthmere_position)
+	if not path_assigned:
+		StrategicMap.set_entity_display_name(entity_id, previous_display_name)
+		StrategicMap.set_entity_metadata(entity_id, previous_metadata)
+		EventBus.add_event("Cannot return field crew to Hearthmere for disband: %s." % str(path_debug.get("reason", "unknown")))
+		_refresh_all_ui()
+		return
+
+	EventBus.add_event("Field crew returning to Hearthmere to disband.")
 	_refresh_all_ui()
 
 
@@ -1441,6 +1463,9 @@ func _get_selected_entity_state_text(entity: Dictionary, metadata: Dictionary, i
 	if not shipment.is_empty():
 		return "In transit"
 
+	if str(metadata.get("state", "")) == "returning_to_disband":
+		return "Returning to disband"
+
 	if is_moving:
 		return "Traveling"
 
@@ -1451,11 +1476,14 @@ func _get_selected_entity_state_text(entity: Dictionary, metadata: Dictionary, i
 
 
 func _get_selected_entity_destination_text(entity: Dictionary, metadata: Dictionary, is_moving: bool) -> String:
+	var destination_id: String = str(metadata.get("destination_id", ""))
+	if destination_id == "hearthmere":
+		return "Hearthmere"
+
 	if is_moving:
 		var target_position: Vector2 = entity["target_world_position"] as Vector2
 		return "World %.1f, %.1f" % [target_position.x, target_position.y]
 
-	var destination_id: String = str(metadata.get("destination_id", ""))
 	if destination_id.is_empty():
 		destination_id = str(metadata.get("prospect_id", ""))
 	if not destination_id.is_empty():
@@ -1636,6 +1664,7 @@ class MapCanvas extends Control:
 			])
 			if _main:
 				_main._refresh_selected_entity_panel()
+				_main._refresh_field_crews_panel()
 				_main._refresh_map_debug_panel()
 		else:
 			var debug: Dictionary = StrategicMap.get_path_debug_summary(StrategicMap.selected_entity_id, destination)

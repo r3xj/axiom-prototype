@@ -300,6 +300,11 @@ func _complete_project(project: Dictionary) -> void:
 
 
 func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> void:
+	if str(metadata.get("state", "")) == "returning_to_disband":
+		_complete_return_to_disband(entity_id)
+		emit_signal("state_changed")
+		return
+
 	var arrival_kind: String = str(metadata.get("kind", ""))
 	if arrival_kind != "survey_expedition" and arrival_kind != "establish_mine":
 		return
@@ -321,6 +326,15 @@ func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> vo
 			_start_on_site_mine_work(i, project, prospect_id)
 		emit_signal("state_changed")
 		return
+
+
+func _complete_return_to_disband(entity_id: String) -> void:
+	if not StrategicMap.entities.has(entity_id):
+		return
+
+	StrategicMap.remove_entity(entity_id)
+	GameState.release_field_crew_labor()
+	EventBus.add_event("Field crew returned to Hearthmere and disbanded. 1 labor team returned to the unassigned pool.")
 
 
 func _start_on_site_survey_work(project_index: int, project: Dictionary, prospect_id: String) -> void:
