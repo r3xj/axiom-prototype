@@ -4,6 +4,8 @@ signal state_changed
 
 const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
 const ESTABLISH_MINE_HOURS: int = 48
+const FIELD_CREW_REUSE_RADIUS: float = 240.0
+const FIELD_CREW_SITE_RADIUS: float = 8.0
 
 var active_projects: Array[Dictionary] = []
 
@@ -115,27 +117,56 @@ func start_establish_mine_project(prospect_id: String) -> void:
 		return
 
 	var project_id: String = "establish_mine_%s" % prospect_id
-	var entity_id: String = "field_crew_mine_%s_%d" % [prospect_id, SimClock.game_hour]
-	var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
 	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
-	StrategicMap.create_entity(entity_id, "Field Crew: %s Mine" % str(prospect["name"]), "field_crew", source_position)
-	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
-	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
-	if not path_assigned:
-		StrategicMap.remove_entity(entity_id)
-		EventBus.add_event("Cannot establish mine at %s: no valid work crew path (%s)." % [
-			str(prospect["name"]),
-			str(path_debug.get("reason", "unknown")),
-		])
-		emit_signal("state_changed")
-		return
+	var entity_id: String = _find_available_field_crew_for_site(prospect_id, destination_position)
+	var reused_field_crew: bool = not entity_id.is_empty()
+	var previous_entity_metadata: Dictionary = {}
+	var previous_display_name: String = ""
+	if reused_field_crew:
+		var previous_entity: Dictionary = StrategicMap.entities[entity_id]
+		previous_entity_metadata = (previous_entity.get("metadata", {}) as Dictionary).duplicate(true)
+		previous_display_name = str(previous_entity.get("display_name", "Field Crew"))
+		StrategicMap.set_entity_display_name(entity_id, "Field Crew: %s Mine" % str(prospect["name"]))
+		EventBus.add_event("[DEBUG] Reusing idle field crew for mine work: %s." % str(prospect["name"]))
+	else:
+		entity_id = "field_crew_mine_%s_%d" % [prospect_id, SimClock.game_hour]
+		var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
+		StrategicMap.create_entity(entity_id, "Field Crew: %s Mine" % str(prospect["name"]), "field_crew", source_position)
 
-	var estimated_hours: int = StrategicMap.estimate_path_hours(entity_id)
 	StrategicMap.set_entity_metadata(entity_id, {
 		"kind": "establish_mine",
 		"project_id": project_id,
 		"prospect_id": prospect_id,
 	})
+
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	var crew_position: Vector2 = entity["world_position"] as Vector2
+	var is_at_site: bool = crew_position.distance_to(destination_position) <= FIELD_CREW_SITE_RADIUS
+	var estimated_hours: int = 0
+	var uses_strategic_entity: bool = false
+	if not is_at_site:
+		var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
+		var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
+		if not path_assigned:
+			if reused_field_crew:
+				StrategicMap.set_entity_display_name(entity_id, previous_display_name)
+				StrategicMap.set_entity_metadata(entity_id, previous_entity_metadata)
+			else:
+				StrategicMap.remove_entity(entity_id)
+			EventBus.add_event("Cannot establish mine at %s: no valid field crew path (%s)." % [
+				str(prospect["name"]),
+				str(path_debug.get("reason", "unknown")),
+			])
+			emit_signal("state_changed")
+			return
+
+		estimated_hours = StrategicMap.estimate_path_hours(entity_id)
+		uses_strategic_entity = true
+		EventBus.add_event("[DEBUG] Field crew mine path assigned: %s path=%d eta=%s." % [
+			str(prospect["name"]),
+			int(path_debug.get("path_length", 0)),
+			"%dh" % estimated_hours,
+		])
 
 	prospect["status"] = "mine_building"
 	GameState.prospects[prospect_id] = prospect
@@ -145,26 +176,25 @@ func start_establish_mine_project(prospect_id: String) -> void:
 	var project: Dictionary = {
 		"id": project_id,
 		"type": "establish_mine",
-		"state": "traveling_to_site",
+		"state": "traveling_to_site" if uses_strategic_entity else "building_on_site",
 		"target_id": prospect_id,
 		"entity_id": entity_id,
-		"title": "Field Crew Mine: %s" % prospect["name"],
-		"remaining_hours": estimated_hours,
-		"total_hours": estimated_hours,
+		"title": "Field Crew Mine: %s" % prospect["name"] if uses_strategic_entity else "Building Mine: %s" % str(prospect["name"]),
+		"remaining_hours": estimated_hours if uses_strategic_entity else ESTABLISH_MINE_HOURS,
+		"total_hours": estimated_hours if uses_strategic_entity else ESTABLISH_MINE_HOURS,
 		"labor_teams": 2,
 		"hourly_supply_cost": 1.0,
 		"supply_source": "hearthmere",
 		"last_stall_log_hour": -999,
-		"uses_strategic_entity": true,
+		"uses_strategic_entity": uses_strategic_entity,
 	}
 	active_projects.append(project)
 
-	EventBus.add_event("[DEBUG] Field crew mine path assigned: %s path=%d eta=%s." % [
-		str(prospect["name"]),
-		int(path_debug.get("path_length", 0)),
-		"%dh" % estimated_hours,
-	])
-	EventBus.add_event("Field crew dispatched to establish mine: %s." % prospect["name"])
+	if uses_strategic_entity:
+		EventBus.add_event("Field crew dispatched to establish mine: %s." % prospect["name"])
+	else:
+		EventBus.add_event("[DEBUG] Field crew already at mine site; construction started: %s." % str(prospect["name"]))
+		EventBus.add_event("Field crew started establishing mine: %s." % prospect["name"])
 	emit_signal("state_changed")
 
 func force_complete_top_project() -> void:
@@ -319,6 +349,62 @@ func _mark_field_crew_idle(project: Dictionary, completed_task: String) -> void:
 		site_name,
 		completed_task.replace("_", " "),
 	])
+
+
+func _find_available_field_crew_for_site(prospect_id: String, target_position: Vector2) -> String:
+	var best_entity_id: String = ""
+	var best_distance: float = INF
+
+	for entity_key in StrategicMap.entities.keys():
+		var entity_id: String = str(entity_key)
+		if not _is_available_idle_field_crew(entity_id):
+			continue
+
+		var entity: Dictionary = StrategicMap.entities[entity_id]
+		var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
+		var entity_position: Vector2 = entity["world_position"] as Vector2
+		var distance: float = entity_position.distance_to(target_position)
+		var site_id: String = str(metadata.get("site_id", ""))
+		var prospect_metadata_id: String = str(metadata.get("prospect_id", ""))
+		var is_site_match: bool = site_id == prospect_id or prospect_metadata_id == prospect_id
+		var is_near_site: bool = distance <= FIELD_CREW_REUSE_RADIUS
+		if not is_site_match and not is_near_site:
+			continue
+		if is_site_match:
+			distance = minf(distance, 0.0)
+
+		if distance < best_distance:
+			best_distance = distance
+			best_entity_id = entity_id
+
+	return best_entity_id
+
+
+func _is_available_idle_field_crew(entity_id: String) -> bool:
+	if not StrategicMap.entities.has(entity_id):
+		return false
+
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	if str(entity.get("profile_id", "")) != "field_crew":
+		return false
+
+	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
+	if str(metadata.get("state", "")) != "idle":
+		return false
+
+	var path_points: Array = entity.get("path_points", []) as Array
+	if not path_points.is_empty():
+		return false
+
+	return not _is_entity_assigned_to_active_project(entity_id)
+
+
+func _is_entity_assigned_to_active_project(entity_id: String) -> bool:
+	for project in active_projects:
+		if str(project.get("entity_id", "")) == entity_id:
+			return true
+	return false
+
 
 func start_forge_project(output_type: String, material_inputs: Dictionary) -> void:
 	var forge_outputs: Dictionary = ScenarioData.get_forge_outputs()

@@ -185,6 +185,15 @@ func set_entity_metadata(entity_id: String, metadata: Dictionary) -> void:
 	emit_signal("entity_changed")
 
 
+func set_entity_display_name(entity_id: String, display_name: String) -> void:
+	if not entities.has(entity_id):
+		return
+	var entity: Dictionary = entities[entity_id]
+	entity["display_name"] = display_name
+	entities[entity_id] = entity
+	emit_signal("entity_changed")
+
+
 func remove_entity(entity_id: String) -> void:
 	if not entities.has(entity_id):
 		return
