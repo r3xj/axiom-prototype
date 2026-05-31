@@ -2,6 +2,7 @@ extends Node
 
 signal entity_changed
 signal selected_entity_changed
+signal entity_arrived(entity_id: String, metadata: Dictionary)
 
 const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
 
@@ -152,6 +153,7 @@ func _make_entity(entity_id: String, display_name: String, profile_id: String, w
 		"path_index": 0,
 		"world_units_per_sim_hour": float(profile["world_units_per_sim_hour"]),
 		"movement_debug_logged": false,
+		"metadata": {},
 	}
 
 
@@ -160,6 +162,14 @@ func create_entity(entity_id: String, display_name: String, profile_id: String, 
 		return
 	entities[entity_id] = _make_entity(entity_id, display_name, profile_id, world_position)
 	emit_signal("entity_changed")
+
+
+func set_entity_metadata(entity_id: String, metadata: Dictionary) -> void:
+	if not entities.has(entity_id):
+		return
+	var entity: Dictionary = entities[entity_id]
+	entity["metadata"] = metadata.duplicate(true)
+	entities[entity_id] = entity
 
 
 func remove_entity(entity_id: String) -> void:
@@ -433,10 +443,13 @@ func _advance_entity(entity_id: String, delta_sim_hours: float) -> bool:
 			path_index,
 			path_points.size(),
 		])
-	if path_index >= path_points.size():
+	var arrived: bool = path_index >= path_points.size()
+	if arrived:
 		entity["path_points"] = []
 		entity["path_index"] = 0
 	entities[entity_id] = entity
+	if arrived:
+		emit_signal("entity_arrived", entity_id, entity["metadata"])
 	return true
 
 
