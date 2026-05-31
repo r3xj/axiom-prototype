@@ -72,6 +72,7 @@ func start_survey_project(prospect_id: String) -> void:
 	var project: Dictionary = {
 		"id": "survey_%s" % prospect_id,
 		"type": "survey_expedition",
+		"state": "traveling_to_site",
 		"target_id": prospect_id,
 		"entity_id": entity_id,
 		"title": "Survey Expedition: %s" % prospect["name"],
@@ -176,6 +177,7 @@ func _complete_project(project: Dictionary) -> void:
 	if project_type == "survey":
 		_complete_survey_project(str(project["target_id"]))
 	elif project_type == "survey_expedition":
+		EventBus.add_event("[DEBUG] Survey work complete: %s." % str(project["target_id"]))
 		StrategicMap.remove_entity(str(project.get("entity_id", "")))
 		_complete_survey_project(str(project["target_id"]))
 	elif project_type == "establish_mine":
@@ -201,12 +203,32 @@ func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> vo
 		if str(project.get("entity_id", "")) != entity_id:
 			continue
 
-		active_projects.remove_at(i)
-		StrategicMap.remove_entity(entity_id)
 		EventBus.add_event("[DEBUG] Survey expedition arrived: %s." % prospect_id)
-		_complete_survey_project(prospect_id)
+		_start_on_site_survey_work(i, project, prospect_id)
 		emit_signal("state_changed")
 		return
+
+
+func _start_on_site_survey_work(project_index: int, project: Dictionary, prospect_id: String) -> void:
+	if not GameState.prospects.has(prospect_id):
+		StrategicMap.remove_entity(str(project.get("entity_id", "")))
+		active_projects.remove_at(project_index)
+		EventBus.add_event("Survey expedition arrived, but prospect no longer exists: %s." % prospect_id)
+		return
+
+	var prospect: Dictionary = GameState.prospects[prospect_id]
+	var survey_hours: int = int(prospect["survey_hours"])
+	project["state"] = "surveying_on_site"
+	project["uses_strategic_entity"] = false
+	project["remaining_hours"] = survey_hours
+	project["total_hours"] = survey_hours
+	project["title"] = "Surveying On Site: %s" % str(prospect["name"])
+	active_projects[project_index] = project
+
+	EventBus.add_event("[DEBUG] Survey work started on site: %s (%s)." % [
+		str(prospect["name"]),
+		"%dh" % survey_hours,
+	])
 
 func start_forge_project(output_type: String, material_inputs: Dictionary) -> void:
 	var forge_outputs: Dictionary = ScenarioData.get_forge_outputs()
