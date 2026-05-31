@@ -14,7 +14,7 @@ const TERRAIN_WATER: String = "water"
 const MOVEMENT_PROFILES: Dictionary = {
 	"caravan": {
 		"display_name": "Caravan",
-		"speed": 26.0,
+		"world_units_per_sim_hour": 26.0,
 		"terrain_costs": {
 			"plains": 1.2,
 			"forest": 3.6,
@@ -26,7 +26,7 @@ const MOVEMENT_PROFILES: Dictionary = {
 	},
 	"army": {
 		"display_name": "Army",
-		"speed": 34.0,
+		"world_units_per_sim_hour": 34.0,
 		"terrain_costs": {
 			"plains": 1.1,
 			"forest": 2.0,
@@ -51,12 +51,16 @@ var last_hover_world_position: Vector2 = Vector2.ZERO
 func _ready() -> void:
 	_build_map()
 	_create_debug_entities()
+	SimClock.simulation_time_advanced.connect(update_entities)
 
 
-func _process(delta: float) -> void:
+func update_entities(delta_sim_hours: float) -> void:
+	if delta_sim_hours <= 0.0:
+		return
+
 	var changed: bool = false
 	for entity_id in entities.keys():
-		if _advance_entity(entity_id, delta):
+		if _advance_entity(entity_id, delta_sim_hours):
 			changed = true
 	if changed:
 		emit_signal("entity_changed")
@@ -146,7 +150,7 @@ func _make_entity(entity_id: String, display_name: String, profile_id: String, w
 		"target_world_position": world_position,
 		"path_points": [],
 		"path_index": 0,
-		"speed": float(profile["speed"]),
+		"world_units_per_sim_hour": float(profile["world_units_per_sim_hour"]),
 		"movement_debug_logged": false,
 	}
 
@@ -334,8 +338,8 @@ func estimate_path_hours(entity_id: String) -> int:
 		var a: Vector2 = points[i] as Vector2
 		var b: Vector2 = points[i + 1] as Vector2
 		distance += a.distance_to(b)
-	var speed: float = maxf(float(entity["speed"]), 1.0)
-	return max(1, int(ceil(distance / speed)))
+	var world_units_per_sim_hour: float = maxf(float(entity["world_units_per_sim_hour"]), 1.0)
+	return max(1, int(ceil(distance / world_units_per_sim_hour)))
 
 
 func get_poi_world_position(poi_id: String) -> Vector2:
@@ -390,14 +394,14 @@ func _cell_index(cell: Vector2i) -> int:
 	return cell.y * grid_size.x + cell.x
 
 
-func _advance_entity(entity_id: String, delta: float) -> bool:
+func _advance_entity(entity_id: String, delta_sim_hours: float) -> bool:
 	var entity: Dictionary = entities[entity_id]
 	var path_points: Array = entity["path_points"]
 	var path_index: int = int(entity["path_index"])
 	if path_points.is_empty() or path_index >= path_points.size():
 		return false
 
-	var remaining_distance: float = float(entity["speed"]) * delta
+	var remaining_distance: float = float(entity["world_units_per_sim_hour"]) * delta_sim_hours
 	var world_position: Vector2 = entity["world_position"] as Vector2
 	var starting_position: Vector2 = world_position
 

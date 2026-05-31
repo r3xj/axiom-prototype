@@ -7,6 +7,8 @@ var selected_region_id: String = "hearthmere"
 var _suppress_refresh: bool = false
 
 var time_label: Label
+var playback_button: Button
+var speed_label: Label
 var info_title: Label
 var info_body: Label
 var economy_body: Label
@@ -37,6 +39,7 @@ func _ready() -> void:
 	StrategicMap.entity_changed.connect(_on_strategic_map_changed)
 	StrategicMap.selected_entity_changed.connect(_on_strategic_map_changed)
 	SimClock.hours_advanced.connect(_on_hours_advanced)
+	SimClock.playback_changed.connect(_on_playback_changed)
 
 	EventBus.add_event("Scenario started. Hearthmere surveys its known surroundings.")
 	_refresh_all_ui()
@@ -49,6 +52,10 @@ func _on_state_changed() -> void:
 
 func _on_hours_advanced() -> void:
 	_refresh_all_ui()
+
+
+func _on_playback_changed() -> void:
+	_refresh_playback_controls()
 
 
 func _on_strategic_map_changed() -> void:
@@ -98,6 +105,30 @@ func _build_top_bar(parent: Control) -> void:
 	time_label = Label.new()
 	time_label.custom_minimum_size = Vector2(140, 0)
 	top_bar_content.add_child(time_label)
+
+	playback_button = Button.new()
+	playback_button.custom_minimum_size = Vector2(64, 0)
+	playback_button.pressed.connect(Callable(SimClock, "toggle_paused"))
+	top_bar_content.add_child(playback_button)
+
+	speed_label = Label.new()
+	speed_label.custom_minimum_size = Vector2(48, 0)
+	top_bar_content.add_child(speed_label)
+
+	var speed_1x_button := Button.new()
+	speed_1x_button.text = "1x"
+	speed_1x_button.pressed.connect(Callable(SimClock, "set_speed_multiplier").bind(1.0))
+	top_bar_content.add_child(speed_1x_button)
+
+	var speed_4x_button := Button.new()
+	speed_4x_button.text = "4x"
+	speed_4x_button.pressed.connect(Callable(SimClock, "set_speed_multiplier").bind(4.0))
+	top_bar_content.add_child(speed_4x_button)
+
+	var speed_12x_button := Button.new()
+	speed_12x_button.text = "12x"
+	speed_12x_button.pressed.connect(Callable(SimClock, "set_speed_multiplier").bind(12.0))
+	top_bar_content.add_child(speed_12x_button)
 
 	var advance_1h_button := Button.new()
 	advance_1h_button.text = "+1h"
@@ -405,10 +436,18 @@ func _refresh_all_ui() -> void:
 	_refresh_event_log_panel()
 	_refresh_codex_panel()
 	_refresh_map_debug_panel()
+	_refresh_playback_controls()
 
 
 func _refresh_time_label() -> void:
 	time_label.text = "Day %d — %02d:00" % [SimClock.get_day_number(), SimClock.get_hour_of_day()]
+
+
+func _refresh_playback_controls() -> void:
+	if playback_button:
+		playback_button.text = "Play" if SimClock.is_paused else "Pause"
+	if speed_label:
+		speed_label.text = "%.0fx" % SimClock.speed_multiplier
 
 
 func _refresh_region_panel() -> void:
