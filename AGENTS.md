@@ -122,6 +122,10 @@ If a Phase 1B brief exists, read it after those:
 
 3. `docs/phase_1b_map_foundation.md`
 
+If a current status handoff exists, read it after the Phase 1B brief:
+
+4. `docs/phase_1b_current_status.md`
+
 The full GDD is available in `docs/`, but it is reference material, not implementation permission.
 
 Do not implement future systems just because they are mentioned in the GDD.
