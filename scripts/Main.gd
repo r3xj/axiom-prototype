@@ -5,6 +5,8 @@ const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
 
 var selected_region_id: String = "hearthmere"
 var _suppress_refresh: bool = false
+var _interactive_refresh_pending: bool = false
+var _interactive_refresh_scheduled: bool = false
 
 var time_label: Label
 var playback_button: Button
@@ -50,12 +52,14 @@ func _ready() -> void:
 
 
 func _on_state_changed() -> void:
-	if not _suppress_refresh:
-		_refresh_all_ui()
+	if _suppress_refresh:
+		return
+	_refresh_dynamic_ui()
+	_request_interactive_ui_refresh()
 
 
 func _on_hours_advanced() -> void:
-	_refresh_all_ui()
+	_refresh_dynamic_ui()
 
 
 func _on_playback_changed() -> void:
@@ -68,11 +72,20 @@ func _on_strategic_map_changed() -> void:
 	if _entity_overlay:
 		_entity_overlay.queue_redraw()
 	if selected_entity_body:
-		_refresh_selected_entity_panel()
-	if selected_entity_actions_box:
-		_refresh_selected_entity_actions()
+		_refresh_selected_entity_info()
+	if field_crew_list_box:
+		_refresh_field_crew_list_text()
 	if map_debug_body:
 		_refresh_map_debug_panel()
+
+
+func _input(event: InputEvent) -> void:
+	var mouse_button := event as InputEventMouseButton
+	if mouse_button == null:
+		return
+	if mouse_button.button_index != MOUSE_BUTTON_LEFT or mouse_button.pressed:
+		return
+	_schedule_pending_interactive_refresh()
 
 
 func _clear_existing_children() -> void:
@@ -464,6 +477,7 @@ func _advance_hours(hours: int) -> void:
 	_suppress_refresh = true
 	SimClock.advance_hours(hours)
 	_suppress_refresh = false
+	_refresh_all_ui()
 
 
 func _change_supply_labor(delta: int) -> void:
@@ -489,20 +503,57 @@ func _get_unassigned_labor_teams() -> int:
 
 
 func _refresh_all_ui() -> void:
+	_refresh_dynamic_ui()
+	_refresh_interactive_ui()
+
+
+func _refresh_dynamic_ui() -> void:
 	_refresh_time_label()
 	_refresh_global_status_bar()
-	_refresh_region_panel()
-	_refresh_region_buttons()
-	_refresh_prospects_panel()
 	_refresh_economy_panel()
 	_refresh_projects_panel()
 	_refresh_shipments_panel()
 	_refresh_event_log_panel()
 	_refresh_codex_panel()
-	_refresh_selected_entity_panel()
-	_refresh_field_crews_panel()
+	_refresh_selected_entity_info()
+	_refresh_field_crew_list_text()
 	_refresh_map_debug_panel()
 	_refresh_playback_controls()
+
+
+func _refresh_interactive_ui() -> void:
+	_refresh_region_panel()
+	_refresh_region_buttons()
+	_refresh_prospects_panel()
+	_refresh_selected_entity_actions()
+	_refresh_field_crews_panel()
+
+
+func _request_interactive_ui_refresh() -> void:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_interactive_refresh_pending = true
+		return
+
+	_interactive_refresh_pending = false
+	_refresh_interactive_ui()
+
+
+func _schedule_pending_interactive_refresh() -> void:
+	if not _interactive_refresh_pending or _interactive_refresh_scheduled:
+		return
+	_interactive_refresh_scheduled = true
+	call_deferred("_flush_pending_interactive_refresh")
+
+
+func _flush_pending_interactive_refresh() -> void:
+	_interactive_refresh_scheduled = false
+	if not _interactive_refresh_pending:
+		return
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		return
+
+	_interactive_refresh_pending = false
+	_refresh_interactive_ui()
 
 
 func _refresh_time_label() -> void:
@@ -837,6 +888,24 @@ func _refresh_field_crews_panel() -> void:
 		summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(summary)
+
+
+func _refresh_field_crew_list_text() -> void:
+	if not field_crew_list_box:
+		return
+
+	for row in field_crew_list_box.get_children():
+		if not (row is HBoxContainer):
+			continue
+		var row_name: String = str(row.name)
+		if not row_name.begins_with("FieldCrewRow_"):
+			continue
+		var entity_id: String = row_name.substr("FieldCrewRow_".length())
+		for child in row.get_children():
+			if child is Label:
+				var summary_label: Label = child as Label
+				summary_label.text = _format_field_crew_list_summary(entity_id)
+				break
 
 
 func _refresh_shipments_panel() -> void:
@@ -1345,17 +1414,20 @@ func _refresh_map_debug_panel() -> void:
 
 
 func _refresh_selected_entity_panel() -> void:
+	_refresh_selected_entity_info()
+	_refresh_selected_entity_actions()
+
+
+func _refresh_selected_entity_info() -> void:
 	if not selected_entity_body:
 		return
 
 	var entity_id: String = StrategicMap.selected_entity_id
 	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
 		selected_entity_body.text = "No entity selected."
-		_refresh_selected_entity_actions()
 		return
 
 	selected_entity_body.text = _format_selected_entity_info(entity_id)
-	_refresh_selected_entity_actions()
 
 
 func _refresh_selected_entity_actions() -> void:
@@ -1689,9 +1761,10 @@ class MapCanvas extends Control:
 				str(context["cell"]),
 			])
 			if _main:
-				_main._refresh_selected_entity_panel()
-				_main._refresh_field_crews_panel()
+				_main._refresh_selected_entity_info()
+				_main._refresh_field_crew_list_text()
 				_main._refresh_map_debug_panel()
+				_main._request_interactive_ui_refresh()
 		else:
 			var debug: Dictionary = StrategicMap.get_path_debug_summary(StrategicMap.selected_entity_id, destination)
 			EventBus.add_event("[DEBUG] No valid path to selected map destination: %s." % str(debug.get("reason", "unknown")))
@@ -1817,7 +1890,9 @@ class EntityOverlay extends Control:
 		StrategicMap.select_entity(entity_id)
 		EventBus.add_event("[DEBUG] Selected strategic entity: %s." % entity_id)
 		if _main:
+			_main._refresh_selected_entity_info()
 			_main._refresh_map_debug_panel()
+			_main._request_interactive_ui_refresh()
 		get_viewport().set_input_as_handled()
 		queue_redraw()
 
