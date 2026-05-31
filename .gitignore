@@ -13,3 +13,5 @@ export/
 .DS_Store
 Thumbs.db
 .vscode/
+
+*.log
