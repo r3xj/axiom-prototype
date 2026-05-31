@@ -30,6 +30,14 @@ func has_available_field_crew_for_site(prospect_id: String) -> bool:
 	return not _find_available_field_crew_for_site(prospect_id, target_position).is_empty()
 
 
+func can_assign_field_crew_to_survey(entity_id: String, prospect_id: String) -> bool:
+	return _can_start_survey_at_site(prospect_id) and _is_available_idle_field_crew(entity_id)
+
+
+func can_assign_field_crew_to_establish_mine(entity_id: String, prospect_id: String) -> bool:
+	return _can_start_establish_mine_at_site(prospect_id) and _is_available_idle_field_crew(entity_id)
+
+
 func _get_unassigned_labor_teams() -> int:
 	var assigned: int = (GameState.supply_production_labor_teams
 		+ get_project_labor_teams()
@@ -39,6 +47,30 @@ func _get_unassigned_labor_teams() -> int:
 	return max(0, GameState.get_total_labor_teams() - assigned)
 
 func start_survey_project(prospect_id: String) -> void:
+	_start_survey_project_with_entity(prospect_id, "")
+
+
+func start_survey_project_with_field_crew(prospect_id: String, entity_id: String) -> void:
+	if not can_assign_field_crew_to_survey(entity_id, prospect_id):
+		EventBus.add_event("Selected Field Crew cannot be assigned to survey this site.")
+		emit_signal("state_changed")
+		return
+	_start_survey_project_with_entity(prospect_id, entity_id)
+
+
+func start_establish_mine_project(prospect_id: String) -> void:
+	_start_establish_mine_project_with_entity(prospect_id, "")
+
+
+func start_establish_mine_project_with_field_crew(prospect_id: String, entity_id: String) -> void:
+	if not can_assign_field_crew_to_establish_mine(entity_id, prospect_id):
+		EventBus.add_event("Selected Field Crew cannot be assigned to establish this mine.")
+		emit_signal("state_changed")
+		return
+	_start_establish_mine_project_with_entity(prospect_id, entity_id)
+
+
+func _start_survey_project_with_entity(prospect_id: String, requested_entity_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):
 		return
 
@@ -53,16 +85,20 @@ func start_survey_project(prospect_id: String) -> void:
 
 	var project_id: String = "survey_%s" % prospect_id
 	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
-	var entity_id: String = _find_available_field_crew_for_site(prospect_id, destination_position)
-	var reused_field_crew: bool = not entity_id.is_empty()
+	var uses_selected_field_crew: bool = not requested_entity_id.is_empty()
+	var entity_id: String = requested_entity_id if uses_selected_field_crew else _find_available_field_crew_for_site(prospect_id, destination_position)
+	var uses_existing_field_crew: bool = not entity_id.is_empty()
 	var previous_entity_metadata: Dictionary = {}
 	var previous_display_name: String = ""
-	if reused_field_crew:
+	if uses_existing_field_crew:
 		var previous_entity: Dictionary = StrategicMap.entities[entity_id]
 		previous_entity_metadata = (previous_entity.get("metadata", {}) as Dictionary).duplicate(true)
 		previous_display_name = str(previous_entity.get("display_name", "Field Crew"))
 		StrategicMap.set_entity_display_name(entity_id, "Field Crew: %s Survey" % str(prospect["name"]))
-		EventBus.add_event("[DEBUG] Reusing idle field crew for survey: %s." % str(prospect["name"]))
+		if uses_selected_field_crew:
+			EventBus.add_event("[DEBUG] Assigning selected field crew to survey: %s." % str(prospect["name"]))
+		else:
+			EventBus.add_event("[DEBUG] Reusing idle field crew for survey: %s." % str(prospect["name"]))
 	else:
 		if _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST:
 			EventBus.add_event("No unassigned labor team is available to form a field crew.")
@@ -88,7 +124,7 @@ func start_survey_project(prospect_id: String) -> void:
 		var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
 		var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
 		if not path_assigned:
-			if reused_field_crew:
+			if uses_existing_field_crew:
 				StrategicMap.set_entity_display_name(entity_id, previous_display_name)
 				StrategicMap.set_entity_metadata(entity_id, previous_entity_metadata)
 			else:
@@ -133,7 +169,8 @@ func start_survey_project(prospect_id: String) -> void:
 		EventBus.add_event("Field crew started surveying: %s." % prospect["name"])
 	emit_signal("state_changed")
 
-func start_establish_mine_project(prospect_id: String) -> void:
+
+func _start_establish_mine_project_with_entity(prospect_id: String, requested_entity_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):
 		return
 
@@ -152,16 +189,20 @@ func start_establish_mine_project(prospect_id: String) -> void:
 
 	var project_id: String = "establish_mine_%s" % prospect_id
 	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
-	var entity_id: String = _find_available_field_crew_for_site(prospect_id, destination_position)
-	var reused_field_crew: bool = not entity_id.is_empty()
+	var uses_selected_field_crew: bool = not requested_entity_id.is_empty()
+	var entity_id: String = requested_entity_id if uses_selected_field_crew else _find_available_field_crew_for_site(prospect_id, destination_position)
+	var uses_existing_field_crew: bool = not entity_id.is_empty()
 	var previous_entity_metadata: Dictionary = {}
 	var previous_display_name: String = ""
-	if reused_field_crew:
+	if uses_existing_field_crew:
 		var previous_entity: Dictionary = StrategicMap.entities[entity_id]
 		previous_entity_metadata = (previous_entity.get("metadata", {}) as Dictionary).duplicate(true)
 		previous_display_name = str(previous_entity.get("display_name", "Field Crew"))
 		StrategicMap.set_entity_display_name(entity_id, "Field Crew: %s Mine" % str(prospect["name"]))
-		EventBus.add_event("[DEBUG] Reusing idle field crew for mine work: %s." % str(prospect["name"]))
+		if uses_selected_field_crew:
+			EventBus.add_event("[DEBUG] Assigning selected field crew to mine work: %s." % str(prospect["name"]))
+		else:
+			EventBus.add_event("[DEBUG] Reusing idle field crew for mine work: %s." % str(prospect["name"]))
 	else:
 		if _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST:
 			EventBus.add_event("No unassigned labor team is available to form a field crew.")
@@ -187,7 +228,7 @@ func start_establish_mine_project(prospect_id: String) -> void:
 		var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
 		var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
 		if not path_assigned:
-			if reused_field_crew:
+			if uses_existing_field_crew:
 				StrategicMap.set_entity_display_name(entity_id, previous_display_name)
 				StrategicMap.set_entity_metadata(entity_id, previous_entity_metadata)
 			else:
@@ -405,6 +446,26 @@ func _mark_field_crew_idle(project: Dictionary, completed_task: String) -> void:
 		site_name,
 		completed_task.replace("_", " "),
 	])
+
+
+func _can_start_survey_at_site(prospect_id: String) -> bool:
+	if not GameState.prospects.has(prospect_id):
+		return false
+	var prospect: Dictionary = GameState.prospects[prospect_id]
+	if str(prospect.get("status", "")) != "unsurveyed":
+		return false
+	return StrategicMap.pois.has(prospect_id)
+
+
+func _can_start_establish_mine_at_site(prospect_id: String) -> bool:
+	if not GameState.prospects.has(prospect_id):
+		return false
+	var prospect: Dictionary = GameState.prospects[prospect_id]
+	if str(prospect.get("status", "")) != "surveyed":
+		return false
+	if str(prospect.get("outcome", "")) != "redglass_deposit":
+		return false
+	return StrategicMap.pois.has(prospect_id)
 
 
 func _find_available_field_crew_for_site(prospect_id: String, target_position: Vector2) -> String:

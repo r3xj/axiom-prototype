@@ -655,6 +655,16 @@ func _refresh_prospects_panel() -> void:
 		text += "\n"
 
 		if status == "unsurveyed":
+			var selected_field_crew_id: String = _get_selected_idle_field_crew_id()
+			if (
+				not selected_field_crew_id.is_empty()
+				and ProjectSystem.can_assign_field_crew_to_survey(selected_field_crew_id, prospect_id)
+			):
+				var assign_button := Button.new()
+				assign_button.text = "Assign Selected Field Crew to Survey: %s" % prospect["name"]
+				assign_button.pressed.connect(ProjectSystem.start_survey_project_with_field_crew.bind(prospect_id, selected_field_crew_id))
+				prospect_buttons_box.add_child(assign_button)
+
 			var button := Button.new()
 			button.text = "Dispatch Field Crew to Survey: %s (1 field crew)" % prospect["name"]
 			button.disabled = (
@@ -664,6 +674,16 @@ func _refresh_prospects_panel() -> void:
 			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
+			var selected_field_crew_id: String = _get_selected_idle_field_crew_id()
+			if (
+				not selected_field_crew_id.is_empty()
+				and ProjectSystem.can_assign_field_crew_to_establish_mine(selected_field_crew_id, prospect_id)
+			):
+				var assign_button := Button.new()
+				assign_button.text = "Assign Selected Field Crew to Establish Mine: %s" % prospect["name"]
+				assign_button.pressed.connect(ProjectSystem.start_establish_mine_project_with_field_crew.bind(prospect_id, selected_field_crew_id))
+				prospect_buttons_box.add_child(assign_button)
+
 			var button := Button.new()
 			button.text = "Dispatch Field Crew to Establish Mine: %s (2d, 1 field crew, 1.0 supply/h)" % prospect["name"]
 			button.disabled = (
@@ -1369,6 +1389,12 @@ func _is_selected_idle_field_crew() -> bool:
 
 	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
 	return str(metadata.get("state", "")) == "idle"
+
+
+func _get_selected_idle_field_crew_id() -> String:
+	if not _is_selected_idle_field_crew():
+		return ""
+	return StrategicMap.selected_entity_id
 
 
 func _disband_selected_idle_field_crew() -> void:
