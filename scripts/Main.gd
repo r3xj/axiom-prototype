@@ -21,6 +21,7 @@ var event_log_body: Label
 var supply_minus_button: Button
 var supply_plus_button: Button
 var codex_body: Label
+var selected_entity_body: Label
 var map_debug_body: Label
 
 var region_buttons: Dictionary = {}
@@ -63,6 +64,8 @@ func _on_strategic_map_changed() -> void:
 		_map_canvas.queue_redraw()
 	if _entity_overlay:
 		_entity_overlay.queue_redraw()
+	if selected_entity_body:
+		_refresh_selected_entity_panel()
 	if map_debug_body:
 		_refresh_map_debug_panel()
 
@@ -435,6 +438,7 @@ func _refresh_all_ui() -> void:
 	_refresh_shipments_panel()
 	_refresh_event_log_panel()
 	_refresh_codex_panel()
+	_refresh_selected_entity_panel()
 	_refresh_map_debug_panel()
 	_refresh_playback_controls()
 
@@ -1023,6 +1027,15 @@ func _build_debug_panel(parent: Control) -> void:
 	map_label.text = "— Strategic Map —"
 	debug_content.add_child(map_label)
 
+	var selected_label := Label.new()
+	selected_label.text = "Selected Entity"
+	debug_content.add_child(selected_label)
+
+	selected_entity_body = Label.new()
+	selected_entity_body.text = ""
+	selected_entity_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	debug_content.add_child(selected_entity_body)
+
 	var btn_caravan := Button.new()
 	btn_caravan.text = "[D] Select Caravan"
 	btn_caravan.pressed.connect(_debug_select_map_entity.bind("debug_caravan"))
@@ -1072,6 +1085,7 @@ func _debug_reset_game() -> void:
 
 func _debug_select_map_entity(entity_id: String) -> void:
 	StrategicMap.select_entity(entity_id)
+	_refresh_selected_entity_panel()
 	_refresh_map_debug_panel()
 	if _map_canvas:
 		_map_canvas.queue_redraw()
@@ -1103,6 +1117,145 @@ func _refresh_map_debug_panel() -> void:
 		]
 
 	map_debug_body.text = selected_text + "\n" + _format_hover_inspector()
+
+
+func _refresh_selected_entity_panel() -> void:
+	if not selected_entity_body:
+		return
+
+	var entity_id: String = StrategicMap.selected_entity_id
+	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
+		selected_entity_body.text = "No entity selected."
+		return
+
+	selected_entity_body.text = _format_selected_entity_info(entity_id)
+
+
+func _format_selected_entity_info(entity_id: String) -> String:
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	var world_position: Vector2 = entity["world_position"] as Vector2
+	var cell: Vector2i = StrategicMap.world_to_cell(world_position)
+	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
+	var profile_id: String = str(entity.get("profile_id", ""))
+	var path_points: Array = entity["path_points"]
+	var is_moving: bool = path_points.size() > 0
+	var state_text: String = _get_selected_entity_state_text(entity, metadata, is_moving)
+	var destination_text: String = _get_selected_entity_destination_text(entity, metadata, is_moving)
+	var eta_text: String = _get_selected_entity_eta_text(entity_id, is_moving)
+	var related_text: String = _get_selected_entity_related_text(entity_id, metadata)
+
+	var info_text := (
+		"%s\n"
+		+ "ID: %s\n"
+		+ "Type: %s\n"
+		+ "State: %s\n"
+		+ "World: %.1f, %.1f  Cell: %d, %d\n"
+		+ "Destination: %s\n"
+		+ "ETA: %s"
+	) % [
+		str(entity.get("display_name", entity_id)),
+		entity_id,
+		profile_id,
+		state_text,
+		world_position.x,
+		world_position.y,
+		cell.x,
+		cell.y,
+		destination_text,
+		eta_text,
+	]
+
+	if not related_text.is_empty():
+		info_text += "\n" + related_text
+
+	return info_text
+
+
+func _get_selected_entity_state_text(entity: Dictionary, metadata: Dictionary, is_moving: bool) -> String:
+	var project: Dictionary = _find_project_for_entity(str(entity["id"]))
+	if not project.is_empty():
+		var project_state: String = str(project.get("state", ""))
+		if project_state == "traveling_to_site":
+			return "Traveling to site"
+		if project_state == "surveying_on_site":
+			return "Surveying on site"
+		if project_state == "building_on_site":
+			return "Building on site"
+		return str(project.get("title", "Project active"))
+
+	var shipment: Dictionary = _find_shipment_for_entity(str(entity["id"]), metadata)
+	if not shipment.is_empty():
+		return "In transit"
+
+	if is_moving:
+		return "Traveling"
+	return "Idle"
+
+
+func _get_selected_entity_destination_text(entity: Dictionary, metadata: Dictionary, is_moving: bool) -> String:
+	var destination_id: String = str(metadata.get("destination_id", ""))
+	if destination_id.is_empty():
+		destination_id = str(metadata.get("prospect_id", ""))
+	if not destination_id.is_empty():
+		return _get_activity_location_name(destination_id)
+
+	var project: Dictionary = _find_project_for_entity(str(entity["id"]))
+	if not project.is_empty():
+		return _get_activity_location_name(str(project.get("target_id", "")))
+
+	var shipment: Dictionary = _find_shipment_for_entity(str(entity["id"]), metadata)
+	if not shipment.is_empty():
+		return LogisticsSystem.get_location_name(str(shipment.get("destination", "")))
+
+	if is_moving:
+		var target_position: Vector2 = entity["target_world_position"] as Vector2
+		return "World %.1f, %.1f" % [target_position.x, target_position.y]
+	return "None"
+
+
+func _get_selected_entity_eta_text(entity_id: String, is_moving: bool) -> String:
+	if not is_moving:
+		return "None"
+	return "~%s" % _format_hours(StrategicMap.estimate_remaining_path_hours(entity_id))
+
+
+func _get_selected_entity_related_text(entity_id: String, metadata: Dictionary) -> String:
+	var lines: Array[String] = []
+	var metadata_kind: String = str(metadata.get("kind", ""))
+	if not metadata_kind.is_empty():
+		lines.append("Metadata: %s" % metadata_kind)
+
+	var project: Dictionary = _find_project_for_entity(entity_id)
+	if not project.is_empty():
+		lines.append("Project: %s" % str(project.get("title", project.get("id", ""))))
+		lines.append("Project ID: %s" % str(project.get("id", "")))
+
+	var shipment: Dictionary = _find_shipment_for_entity(entity_id, metadata)
+	if not shipment.is_empty():
+		var cargo: Dictionary = shipment.get("cargo", {}) as Dictionary
+		lines.append("Shipment: %s" % str(shipment.get("id", "")))
+		lines.append("Cargo: %s" % _format_cargo_summary(cargo))
+
+	if lines.is_empty():
+		return ""
+	return "\n".join(lines)
+
+
+func _find_project_for_entity(entity_id: String) -> Dictionary:
+	for project in ProjectSystem.active_projects:
+		if str(project.get("entity_id", "")) == entity_id:
+			return project
+	return {}
+
+
+func _find_shipment_for_entity(entity_id: String, metadata: Dictionary) -> Dictionary:
+	var shipment_id: String = str(metadata.get("shipment_id", ""))
+	for shipment in LogisticsSystem.active_shipments:
+		if str(shipment.get("entity_id", "")) == entity_id:
+			return shipment
+		if not shipment_id.is_empty() and str(shipment.get("id", "")) == shipment_id:
+			return shipment
+	return {}
 
 
 func _format_hover_inspector() -> String:

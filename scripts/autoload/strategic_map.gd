@@ -201,7 +201,7 @@ func remove_entity(entity_id: String) -> void:
 		return
 	entities.erase(entity_id)
 	if selected_entity_id == entity_id:
-		selected_entity_id = "debug_caravan"
+		selected_entity_id = ""
 		emit_signal("selected_entity_changed")
 	emit_signal("entity_changed")
 
