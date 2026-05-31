@@ -161,6 +161,7 @@ func _make_entity(entity_id: String, display_name: String, profile_id: String, w
 		"profile_id": profile_id,
 		"world_position": world_position,
 		"target_world_position": world_position,
+		"path_origin_world_position": world_position,
 		"path_points": [],
 		"path_index": 0,
 		"world_units_per_sim_hour": float(profile["world_units_per_sim_hour"]),
@@ -237,6 +238,7 @@ func command_entity_to_world_position(entity_id: String, destination_world_posit
 		return false
 
 	var path_points: Array[Vector2] = cells_to_world_path(path_cells, entity_position, destination_world_position)
+	entity["path_origin_world_position"] = entity_position
 	entity["target_world_position"] = clamp_world_position(destination_world_position)
 	entity["path_points"] = path_points
 	entity["path_index"] = 0
