@@ -224,14 +224,15 @@ func _build_map_panel(parent: Control) -> void:
 func _build_side_panel(parent: Control) -> void:
 	var side_scroll := ScrollContainer.new()
 	side_scroll.name = "SideScroll"
-	side_scroll.custom_minimum_size = Vector2(380, 0)
+	side_scroll.custom_minimum_size = Vector2(360, 0)
 	side_scroll.size_flags_horizontal = Control.SIZE_FILL
 	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	parent.add_child(side_scroll)
 
 	var side_panel := VBoxContainer.new()
 	side_panel.name = "SidePanel"
-	side_panel.custom_minimum_size = Vector2(360, 0)
+	side_panel.custom_minimum_size = Vector2(0, 0)
 	side_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	side_panel.add_theme_constant_override("separation", 8)
 	side_scroll.add_child(side_panel)
@@ -645,14 +646,14 @@ func _refresh_region_panel() -> void:
 
 		var blade_ore_cost: float = float(forge_costs.get("redglass_blade", {}).get("redglass_ore", 0.0))
 		var btn_blade := Button.new()
-		btn_blade.text = "Forge Redglass Blade (24h, 1 labor, 10 ore)"
+		btn_blade.text = "Forge Redglass Blade"
 		btn_blade.disabled = _get_unassigned_labor_teams() < 1 or ore_available < blade_ore_cost
 		btn_blade.pressed.connect(_start_forge_project.bind("redglass_blade"))
 		region_action_buttons_box.add_child(btn_blade)
 
 		var armor_ore_cost: float = float(forge_costs.get("redglass_armor_piece", {}).get("redglass_ore", 0.0))
 		var btn_armor := Button.new()
-		btn_armor.text = "Forge Redglass Armor Piece (36h, 1 labor, 15 ore)"
+		btn_armor.text = "Forge Armor Piece"
 		btn_armor.disabled = _get_unassigned_labor_teams() < 1 or ore_available < armor_ore_cost
 		btn_armor.pressed.connect(_start_forge_project.bind("redglass_armor_piece"))
 		region_action_buttons_box.add_child(btn_armor)
@@ -712,12 +713,12 @@ func _refresh_prospects_panel() -> void:
 				and ProjectSystem.can_assign_field_crew_to_survey(selected_field_crew_id, prospect_id)
 			):
 				var assign_button := Button.new()
-				assign_button.text = "Assign Selected Field Crew to Survey: %s" % prospect["name"]
+				assign_button.text = "Assign Selected Crew: Survey"
 				assign_button.pressed.connect(ProjectSystem.start_survey_project_with_field_crew.bind(prospect_id, selected_field_crew_id))
 				prospect_buttons_box.add_child(assign_button)
 
 			var button := Button.new()
-			button.text = "Dispatch Field Crew to Survey: %s (1 field crew)" % prospect["name"]
+			button.text = "Dispatch Crew: Survey"
 			button.disabled = (
 				not ProjectSystem.has_available_field_crew_for_site(prospect_id)
 				and _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST
@@ -731,12 +732,12 @@ func _refresh_prospects_panel() -> void:
 				and ProjectSystem.can_assign_field_crew_to_establish_mine(selected_field_crew_id, prospect_id)
 			):
 				var assign_button := Button.new()
-				assign_button.text = "Assign Selected Field Crew to Establish Mine: %s" % prospect["name"]
+				assign_button.text = "Assign Selected Crew: Build Mine"
 				assign_button.pressed.connect(ProjectSystem.start_establish_mine_project_with_field_crew.bind(prospect_id, selected_field_crew_id))
 				prospect_buttons_box.add_child(assign_button)
 
 			var button := Button.new()
-			button.text = "Dispatch Field Crew to Establish Mine: %s (2d, 1 field crew, 1.0 supply/h)" % prospect["name"]
+			button.text = "Dispatch Crew: Build Mine"
 			button.disabled = (
 				not ProjectSystem.has_available_field_crew_for_site(prospect_id)
 				and _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST
@@ -750,13 +751,13 @@ func _refresh_prospects_panel() -> void:
 			)
 
 			var btn_ashen := Button.new()
-			btn_ashen.text = "Ship Supplies via Ashen Pass (24h, 1 labor, 20 supplies)"
+			btn_ashen.text = "Ship Supplies: Ashen Pass"
 			btn_ashen.disabled = not can_dispatch
 			btn_ashen.pressed.connect(LogisticsSystem.start_shipment.bind("hearthmere", prospect_id, "ashen_pass", {"supplies": LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT}))
 			prospect_buttons_box.add_child(btn_ashen)
 
 			var btn_pine := Button.new()
-			btn_pine.text = "Ship Supplies via Old Pine Road (36h, 1 labor, 20 supplies)"
+			btn_pine.text = "Ship Supplies: Old Pine Road"
 			btn_pine.disabled = not can_dispatch
 			btn_pine.pressed.connect(LogisticsSystem.start_shipment.bind("hearthmere", prospect_id, "old_pine_road", {"supplies": LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT}))
 			prospect_buttons_box.add_child(btn_pine)
@@ -771,7 +772,7 @@ func _refresh_prospects_panel() -> void:
 				var ore_display: String = CodexSystem.get_display_name(produces)
 
 				var btn_ore_ashen := Button.new()
-				btn_ore_ashen.text = "Ship %s via Ashen Pass (24h, 1 labor, 20 ore)" % ore_display
+				btn_ore_ashen.text = "Ship %s: Ashen Pass" % ore_display
 				btn_ore_ashen.disabled = not can_ship_ore
 				var ore_cargo_a: Dictionary = {}
 				ore_cargo_a[produces] = LogisticsSystem.SHIPMENT_ORE_AMOUNT
@@ -779,7 +780,7 @@ func _refresh_prospects_panel() -> void:
 				prospect_buttons_box.add_child(btn_ore_ashen)
 
 				var btn_ore_pine := Button.new()
-				btn_ore_pine.text = "Ship %s via Old Pine Road (36h, 1 labor, 20 ore)" % ore_display
+				btn_ore_pine.text = "Ship %s: Old Pine Road" % ore_display
 				btn_ore_pine.disabled = not can_ship_ore
 				var ore_cargo_p: Dictionary = {}
 				ore_cargo_p[produces] = LogisticsSystem.SHIPMENT_ORE_AMOUNT
@@ -872,16 +873,11 @@ func _refresh_field_crews_panel() -> void:
 		return
 
 	for entity_id in crew_ids:
-		var row := HBoxContainer.new()
+		var row := VBoxContainer.new()
 		row.name = "FieldCrewRow_%s" % entity_id
 		row.add_theme_constant_override("separation", 6)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		field_crew_list_box.add_child(row)
-
-		var select_button := Button.new()
-		select_button.text = "Select"
-		select_button.custom_minimum_size = Vector2(64, 0)
-		select_button.pressed.connect(_select_field_crew_from_list.bind(entity_id))
-		row.add_child(select_button)
 
 		var summary := Label.new()
 		summary.text = _format_field_crew_list_summary(entity_id)
@@ -889,13 +885,24 @@ func _refresh_field_crews_panel() -> void:
 		summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(summary)
 
+		var action_row := HBoxContainer.new()
+		action_row.name = "FieldCrewActions_%s" % entity_id
+		action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(action_row)
+
+		var select_button := Button.new()
+		select_button.text = "Select"
+		select_button.custom_minimum_size = Vector2(64, 0)
+		select_button.pressed.connect(_select_field_crew_from_list.bind(entity_id))
+		action_row.add_child(select_button)
+
 
 func _refresh_field_crew_list_text() -> void:
 	if not field_crew_list_box:
 		return
 
 	for row in field_crew_list_box.get_children():
-		if not (row is HBoxContainer):
+		if not (row is VBoxContainer):
 			continue
 		var row_name: String = str(row.name)
 		if not row_name.begins_with("FieldCrewRow_"):
