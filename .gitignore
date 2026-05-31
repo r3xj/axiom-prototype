@@ -7,6 +7,7 @@
 # Exported builds
 builds/
 exports/
+export/
 
 # OS/editor junk
 .DS_Store
