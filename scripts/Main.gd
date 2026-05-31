@@ -24,6 +24,7 @@ var supply_plus_button: Button
 var codex_body: Label
 var selected_entity_body: Label
 var selected_entity_actions_box: VBoxContainer
+var field_crew_list_box: VBoxContainer
 var map_debug_body: Label
 
 var region_buttons: Dictionary = {}
@@ -70,6 +71,8 @@ func _on_strategic_map_changed() -> void:
 		_refresh_selected_entity_panel()
 	if selected_entity_actions_box:
 		_refresh_selected_entity_actions()
+	if field_crew_list_box:
+		_refresh_field_crews_panel()
 	if map_debug_body:
 		_refresh_map_debug_panel()
 
@@ -223,6 +226,7 @@ func _build_side_panel(parent: Control) -> void:
 	side_scroll.add_child(side_panel)
 
 	_build_selected_entity_panel(side_panel)
+	_build_field_crews_panel(side_panel)
 	_build_region_info_panel(side_panel)
 	_build_prospects_panel(side_panel)
 	_build_projects_panel(side_panel)
@@ -369,6 +373,27 @@ func _build_selected_entity_panel(parent: Control) -> void:
 	selected_content.add_child(selected_entity_actions_box)
 
 
+func _build_field_crews_panel(parent: Control) -> void:
+	var crew_panel := PanelContainer.new()
+	crew_panel.name = "FieldCrewsPanel"
+	parent.add_child(crew_panel)
+
+	var crew_content := VBoxContainer.new()
+	crew_content.name = "FieldCrewsContent"
+	crew_content.add_theme_constant_override("separation", 8)
+	crew_panel.add_child(crew_content)
+
+	var crew_title := Label.new()
+	crew_title.text = "Field Crews"
+	crew_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crew_content.add_child(crew_title)
+
+	field_crew_list_box = VBoxContainer.new()
+	field_crew_list_box.name = "FieldCrewList"
+	field_crew_list_box.add_theme_constant_override("separation", 6)
+	crew_content.add_child(field_crew_list_box)
+
+
 func _build_shipments_panel(parent: Control) -> void:
 	var shipments_panel := PanelContainer.new()
 	shipments_panel.name = "ShipmentsPanel"
@@ -477,6 +502,7 @@ func _refresh_all_ui() -> void:
 	_refresh_event_log_panel()
 	_refresh_codex_panel()
 	_refresh_selected_entity_panel()
+	_refresh_field_crews_panel()
 	_refresh_map_debug_panel()
 	_refresh_playback_controls()
 
@@ -763,6 +789,39 @@ func _refresh_projects_panel() -> void:
 	projects_body.text = text.strip_edges()
 
 
+func _refresh_field_crews_panel() -> void:
+	if not field_crew_list_box:
+		return
+
+	_clear_container_children(field_crew_list_box)
+	var crew_ids: Array[String] = _get_field_crew_entity_ids()
+	if crew_ids.is_empty():
+		var empty_label := Label.new()
+		empty_label.text = "No Field Crews on the map."
+		empty_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		field_crew_list_box.add_child(empty_label)
+		return
+
+	for entity_id in crew_ids:
+		var row := HBoxContainer.new()
+		row.name = "FieldCrewRow_%s" % entity_id
+		row.add_theme_constant_override("separation", 6)
+		field_crew_list_box.add_child(row)
+
+		var select_button := Button.new()
+		select_button.text = "Select"
+		select_button.custom_minimum_size = Vector2(64, 0)
+		select_button.disabled = entity_id == StrategicMap.selected_entity_id
+		select_button.pressed.connect(_select_field_crew_from_list.bind(entity_id))
+		row.add_child(select_button)
+
+		var summary := Label.new()
+		summary.text = _format_field_crew_list_summary(entity_id)
+		summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(summary)
+
+
 func _refresh_shipments_panel() -> void:
 	if not shipments_body:
 		return
@@ -827,6 +886,66 @@ func _get_project_remaining_hours(project: Dictionary) -> int:
 		var entity_id: String = str(project.get("entity_id", ""))
 		return StrategicMap.estimate_remaining_path_hours(entity_id)
 	return int(project.get("remaining_hours", 0))
+
+
+func _get_field_crew_entity_ids() -> Array[String]:
+	var crew_ids: Array[String] = []
+	for entity_key in StrategicMap.entities.keys():
+		var entity_id: String = str(entity_key)
+		var entity: Dictionary = StrategicMap.entities[entity_id]
+		if str(entity.get("profile_id", "")) == "field_crew":
+			crew_ids.append(entity_id)
+	crew_ids.sort()
+	return crew_ids
+
+
+func _format_field_crew_list_summary(entity_id: String) -> String:
+	if not StrategicMap.entities.has(entity_id):
+		return "Unknown Field Crew"
+
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
+	var path_points: Array = entity.get("path_points", []) as Array
+	var is_moving: bool = not path_points.is_empty()
+	var display_name: String = str(entity.get("display_name", entity_id))
+	var state_text: String = _get_selected_entity_state_text(entity, metadata, is_moving)
+	var line: String = "%s: %s" % [display_name, state_text]
+
+	var project: Dictionary = _find_project_for_entity(entity_id)
+	if not project.is_empty():
+		line += " | Task: %s" % str(project.get("title", "Active project"))
+
+	var site_text: String = _get_field_crew_site_text(entity, metadata)
+	if not site_text.is_empty():
+		line += " | Site: %s" % site_text
+
+	var destination_text: String = _get_selected_entity_destination_text(entity, metadata, is_moving)
+	if is_moving:
+		line += " | Destination: %s | ETA %s" % [
+			destination_text,
+			_get_selected_entity_eta_text(entity_id, is_moving),
+		]
+
+	var last_completed_task: String = str(metadata.get("last_completed_task", ""))
+	if project.is_empty() and not last_completed_task.is_empty():
+		line += " | Last: %s" % last_completed_task.replace("_", " ").capitalize()
+
+	return line
+
+
+func _get_field_crew_site_text(entity: Dictionary, metadata: Dictionary) -> String:
+	var site_name: String = str(metadata.get("site_name", ""))
+	if not site_name.is_empty():
+		return site_name
+
+	var prospect_id: String = str(metadata.get("prospect_id", ""))
+	if not prospect_id.is_empty() and GameState.prospects.has(prospect_id):
+		return str(GameState.prospects[prospect_id]["name"])
+
+	var world_position: Vector2 = entity["world_position"] as Vector2
+	var cell_info: Dictionary = StrategicMap.get_cell_debug_info(world_position)
+	var nearby_poi_name: String = str(cell_info.get("nearby_poi_name", ""))
+	return nearby_poi_name
 
 
 func _format_shipment_activity(shipment: Dictionary) -> String:
@@ -1163,6 +1282,18 @@ func _debug_reset_game() -> void:
 func _debug_select_map_entity(entity_id: String) -> void:
 	StrategicMap.select_entity(entity_id)
 	_refresh_selected_entity_panel()
+	_refresh_field_crews_panel()
+	_refresh_map_debug_panel()
+	if _map_canvas:
+		_map_canvas.queue_redraw()
+	if _entity_overlay:
+		_entity_overlay.queue_redraw()
+
+
+func _select_field_crew_from_list(entity_id: String) -> void:
+	StrategicMap.select_entity(entity_id)
+	_refresh_selected_entity_panel()
+	_refresh_field_crews_panel()
 	_refresh_map_debug_panel()
 	if _map_canvas:
 		_map_canvas.queue_redraw()
