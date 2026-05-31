@@ -3,7 +3,6 @@ extends Node
 signal state_changed
 
 const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
-const CLAIM_DEPOSIT_HOURS: int = 12
 const ESTABLISH_MINE_HOURS: int = 48
 
 var active_projects: Array[Dictionary] = []
@@ -99,7 +98,7 @@ func start_establish_mine_project(prospect_id: String) -> void:
 
 	var prospect: Dictionary = GameState.prospects[prospect_id]
 
-	if prospect["status"] != "claimed":
+	if prospect["status"] != "surveyed":
 		return
 
 	if prospect["outcome"] != "redglass_deposit":
@@ -168,78 +167,6 @@ func start_establish_mine_project(prospect_id: String) -> void:
 	EventBus.add_event("Mine work crew dispatched: %s." % prospect["name"])
 	emit_signal("state_changed")
 
-
-func start_claim_deposit_project(prospect_id: String) -> void:
-	if not GameState.prospects.has(prospect_id):
-		return
-
-	var prospect: Dictionary = GameState.prospects[prospect_id]
-
-	if prospect["status"] != "surveyed":
-		return
-
-	if prospect["outcome"] != "redglass_deposit":
-		return
-
-	if _get_unassigned_labor_teams() < 1:
-		EventBus.add_event("No unassigned labor team is available for claim work.")
-		emit_signal("state_changed")
-		return
-
-	if not StrategicMap.pois.has(prospect_id):
-		EventBus.add_event("Cannot claim %s: no strategic map destination found." % str(prospect["name"]))
-		emit_signal("state_changed")
-		return
-
-	var project_id: String = "claim_deposit_%s" % prospect_id
-	var entity_id: String = "work_crew_claim_%s_%d" % [prospect_id, SimClock.game_hour]
-	var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
-	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
-	StrategicMap.create_entity(entity_id, "Claim Crew: %s" % str(prospect["name"]), "work_crew", source_position)
-	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
-	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
-	if not path_assigned:
-		StrategicMap.remove_entity(entity_id)
-		EventBus.add_event("Cannot claim %s: no valid claim crew path (%s)." % [
-			str(prospect["name"]),
-			str(path_debug.get("reason", "unknown")),
-		])
-		emit_signal("state_changed")
-		return
-
-	var estimated_hours: int = StrategicMap.estimate_path_hours(entity_id)
-	StrategicMap.set_entity_metadata(entity_id, {
-		"kind": "claim_deposit",
-		"project_id": project_id,
-		"prospect_id": prospect_id,
-	})
-
-	prospect["status"] = "claiming"
-	GameState.prospects[prospect_id] = prospect
-	GameState.regions["redglass_foothills"]["status"] = "Known / Claim Crew En Route"
-
-	var project: Dictionary = {
-		"id": project_id,
-		"type": "claim_deposit",
-		"state": "traveling_to_site",
-		"target_id": prospect_id,
-		"entity_id": entity_id,
-		"title": "Claim Crew: %s" % prospect["name"],
-		"remaining_hours": estimated_hours,
-		"total_hours": estimated_hours,
-		"labor_teams": 1,
-		"uses_strategic_entity": true,
-	}
-	active_projects.append(project)
-
-	EventBus.add_event("[DEBUG] Claim crew path assigned: %s path=%d eta=%s." % [
-		str(prospect["name"]),
-		int(path_debug.get("path_length", 0)),
-		"%dh" % estimated_hours,
-	])
-	EventBus.add_event("Claim crew dispatched: %s." % prospect["name"])
-	emit_signal("state_changed")
-
 func force_complete_top_project() -> void:
 	if active_projects.is_empty():
 		EventBus.add_event("[DEBUG] No active projects to complete.")
@@ -290,10 +217,6 @@ func _complete_project(project: Dictionary) -> void:
 		EventBus.add_event("[DEBUG] Survey work complete: %s." % str(project["target_id"]))
 		StrategicMap.remove_entity(str(project.get("entity_id", "")))
 		_complete_survey_project(str(project["target_id"]))
-	elif project_type == "claim_deposit":
-		EventBus.add_event("[DEBUG] Claim work complete: %s." % str(project["target_id"]))
-		StrategicMap.remove_entity(str(project.get("entity_id", "")))
-		_complete_claim_deposit_project(str(project["target_id"]))
 	elif project_type == "establish_mine":
 		EventBus.add_event("[DEBUG] Mine establishment work complete: %s." % str(project["target_id"]))
 		StrategicMap.remove_entity(str(project.get("entity_id", "")))
@@ -308,7 +231,7 @@ func _complete_project(project: Dictionary) -> void:
 
 func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> void:
 	var arrival_kind: String = str(metadata.get("kind", ""))
-	if arrival_kind != "survey_expedition" and arrival_kind != "claim_deposit" and arrival_kind != "establish_mine":
+	if arrival_kind != "survey_expedition" and arrival_kind != "establish_mine":
 		return
 
 	var prospect_id: String = str(metadata.get("prospect_id", ""))
@@ -323,9 +246,6 @@ func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> vo
 		if arrival_kind == "survey_expedition":
 			EventBus.add_event("[DEBUG] Survey expedition arrived: %s." % prospect_id)
 			_start_on_site_survey_work(i, project, prospect_id)
-		elif arrival_kind == "claim_deposit":
-			EventBus.add_event("[DEBUG] Claim crew arrived: %s." % prospect_id)
-			_start_on_site_claim_work(i, project, prospect_id)
 		elif arrival_kind == "establish_mine":
 			EventBus.add_event("[DEBUG] Mine work crew arrived: %s." % prospect_id)
 			_start_on_site_mine_work(i, project, prospect_id)
@@ -352,27 +272,6 @@ func _start_on_site_survey_work(project_index: int, project: Dictionary, prospec
 	EventBus.add_event("[DEBUG] Survey work started on site: %s (%s)." % [
 		str(prospect["name"]),
 		"%dh" % survey_hours,
-	])
-
-
-func _start_on_site_claim_work(project_index: int, project: Dictionary, prospect_id: String) -> void:
-	if not GameState.prospects.has(prospect_id):
-		StrategicMap.remove_entity(str(project.get("entity_id", "")))
-		active_projects.remove_at(project_index)
-		EventBus.add_event("Claim crew arrived, but prospect no longer exists: %s." % prospect_id)
-		return
-
-	var prospect: Dictionary = GameState.prospects[prospect_id]
-	project["state"] = "claiming_on_site"
-	project["uses_strategic_entity"] = false
-	project["remaining_hours"] = CLAIM_DEPOSIT_HOURS
-	project["total_hours"] = CLAIM_DEPOSIT_HOURS
-	project["title"] = "Claiming Deposit: %s" % str(prospect["name"])
-	active_projects[project_index] = project
-
-	EventBus.add_event("[DEBUG] Claim work started on site: %s (%s)." % [
-		str(prospect["name"]),
-		"%dh" % CLAIM_DEPOSIT_HOURS,
 	])
 
 
@@ -539,19 +438,6 @@ func _complete_survey_project(prospect_id: String) -> void:
 		EventBus.add_event("Survey complete: %s." % prospect["name"])
 
 	EventBus.add_event(prospect["result_text"])
-
-
-func _complete_claim_deposit_project(prospect_id: String) -> void:
-	if not GameState.prospects.has(prospect_id):
-		return
-
-	var prospect: Dictionary = GameState.prospects[prospect_id]
-	prospect["status"] = "claimed"
-	GameState.prospects[prospect_id] = prospect
-
-	GameState.regions["redglass_foothills"]["status"] = "Known / Redglass Deposit Claimed"
-
-	EventBus.add_event("Deposit claimed: %s. Mine establishment can begin." % str(prospect["name"]))
 
 
 func _complete_establish_mine_project(prospect_id: String) -> void:

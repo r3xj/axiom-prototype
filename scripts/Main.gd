@@ -537,10 +537,8 @@ func _refresh_prospects_panel() -> void:
 
 		if status == "surveyed":
 			text += "Result: %s\n" % prospect["result_text"]
-		elif status == "claiming":
-			text += "A claim crew is working toward securing this deposit.\n"
-		elif status == "claimed":
-			text += "Deposit claimed. Mine establishment can begin.\n"
+			if str(prospect["outcome"]) == "redglass_deposit":
+				text += "Confirmed deposit. Mine work can be dispatched.\n"
 		elif status == "mine_building":
 			text += "A mine is under construction here.\n"
 		elif status == "mine_operational":
@@ -565,12 +563,6 @@ func _refresh_prospects_panel() -> void:
 			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
-			var button := Button.new()
-			button.text = "Dispatch Claim Crew: %s (1 labor)" % prospect["name"]
-			button.disabled = _get_unassigned_labor_teams() < 1
-			button.pressed.connect(ProjectSystem.start_claim_deposit_project.bind(prospect_id))
-			prospect_buttons_box.add_child(button)
-		elif status == "claimed" and str(prospect["outcome"]) == "redglass_deposit":
 			var button := Button.new()
 			button.text = "Dispatch Mine Work Crew: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
 			button.disabled = _get_unassigned_labor_teams() < 2
@@ -794,10 +786,6 @@ func _format_prospect_status(status: String) -> String:
 			return "Surveying"
 		"surveyed":
 			return "Surveyed"
-		"claiming":
-			return "Claiming"
-		"claimed":
-			return "Claimed"
 		"mine_building":
 			return "Mine under construction"
 		"mine_operational":
