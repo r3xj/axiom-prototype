@@ -194,6 +194,7 @@ func set_entity_metadata(entity_id: String, metadata: Dictionary) -> void:
 	var entity: Dictionary = entities[entity_id]
 	entity["metadata"] = metadata.duplicate(true)
 	entities[entity_id] = entity
+	emit_signal("entity_changed")
 
 
 func remove_entity(entity_id: String) -> void:

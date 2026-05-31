@@ -1187,6 +1187,9 @@ func _get_selected_entity_state_text(entity: Dictionary, metadata: Dictionary, i
 	if not shipment.is_empty():
 		return "In transit"
 
+	if str(metadata.get("state", "")) == "idle":
+		return "Idle"
+
 	if is_moving:
 		return "Traveling"
 	return "Idle"
@@ -1198,6 +1201,10 @@ func _get_selected_entity_destination_text(entity: Dictionary, metadata: Diction
 		destination_id = str(metadata.get("prospect_id", ""))
 	if not destination_id.is_empty():
 		return _get_activity_location_name(destination_id)
+
+	var site_id: String = str(metadata.get("site_id", ""))
+	if not site_id.is_empty():
+		return "None (at %s)" % _get_activity_location_name(site_id)
 
 	var project: Dictionary = _find_project_for_entity(str(entity["id"]))
 	if not project.is_empty():
@@ -1224,6 +1231,15 @@ func _get_selected_entity_related_text(entity_id: String, metadata: Dictionary) 
 	var metadata_kind: String = str(metadata.get("kind", ""))
 	if not metadata_kind.is_empty():
 		lines.append("Metadata: %s" % metadata_kind)
+	var metadata_state: String = str(metadata.get("state", ""))
+	if not metadata_state.is_empty():
+		lines.append("Metadata State: %s" % metadata_state.capitalize())
+	var site_name: String = str(metadata.get("site_name", ""))
+	if not site_name.is_empty():
+		lines.append("Site: %s" % site_name)
+	var last_completed_task: String = str(metadata.get("last_completed_task", ""))
+	if not last_completed_task.is_empty():
+		lines.append("Last Task: %s" % last_completed_task.replace("_", " ").capitalize())
 
 	var project: Dictionary = _find_project_for_entity(entity_id)
 	if not project.is_empty():

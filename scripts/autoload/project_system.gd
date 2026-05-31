@@ -219,7 +219,7 @@ func _complete_project(project: Dictionary) -> void:
 		_complete_survey_project(str(project["target_id"]))
 	elif project_type == "establish_mine":
 		EventBus.add_event("[DEBUG] Mine establishment work complete: %s." % str(project["target_id"]))
-		StrategicMap.remove_entity(str(project.get("entity_id", "")))
+		_mark_mine_work_crew_idle(project)
 		_complete_establish_mine_project(str(project["target_id"]))
 	elif project_type == "analyze_material":
 		_complete_analysis_project(str(project["target_id"]))
@@ -294,6 +294,27 @@ func _start_on_site_mine_work(project_index: int, project: Dictionary, prospect_
 		str(prospect["name"]),
 		"%dh" % ESTABLISH_MINE_HOURS,
 	])
+
+
+func _mark_mine_work_crew_idle(project: Dictionary) -> void:
+	var entity_id: String = str(project.get("entity_id", ""))
+	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
+		return
+
+	var prospect_id: String = str(project.get("target_id", ""))
+	var site_name: String = prospect_id
+	if GameState.prospects.has(prospect_id):
+		var prospect: Dictionary = GameState.prospects[prospect_id]
+		site_name = str(prospect["name"])
+
+	StrategicMap.set_entity_metadata(entity_id, {
+		"kind": "work_crew",
+		"state": "idle",
+		"last_completed_task": "mine_construction",
+		"site_id": prospect_id,
+		"site_name": site_name,
+	})
+	EventBus.add_event("[DEBUG] Mine work crew now idle at %s." % site_name)
 
 func start_forge_project(output_type: String, material_inputs: Dictionary) -> void:
 	var forge_outputs: Dictionary = ScenarioData.get_forge_outputs()
