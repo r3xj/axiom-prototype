@@ -1082,35 +1082,74 @@ func _debug_select_map_entity(entity_id: String) -> void:
 func _refresh_map_debug_panel() -> void:
 	if not map_debug_body:
 		return
-	if not StrategicMap.entities.has(StrategicMap.selected_entity_id):
-		map_debug_body.text = "No selected strategic entity."
-		return
+	var selected_text: String = "Selected: none\n"
+	if StrategicMap.entities.has(StrategicMap.selected_entity_id):
+		var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
+		var world_position: Vector2 = entity["world_position"] as Vector2
+		var cell: Vector2i = StrategicMap.world_to_cell(world_position)
+		var path_points: Array = entity["path_points"]
+		selected_text = (
+			"Selected: %s (%s)\n"
+			+ "Entity World: %.1f, %.1f  Cell: %d, %d\n"
+			+ "Path points: %d\n"
+		) % [
+			str(entity["display_name"]),
+			str(entity["profile_id"]),
+			world_position.x,
+			world_position.y,
+			cell.x,
+			cell.y,
+			path_points.size(),
+		]
 
-	var entity: Dictionary = StrategicMap.entities[StrategicMap.selected_entity_id]
-	var world_position: Vector2 = entity["world_position"] as Vector2
-	var cell: Vector2i = StrategicMap.world_to_cell(world_position)
-	var context: Dictionary = StrategicMap.get_tactical_context(world_position)
-	var path_points: Array = entity["path_points"]
+	map_debug_body.text = selected_text + "\n" + _format_hover_inspector()
 
-	map_debug_body.text = (
-		"Selected: %s (%s)\n"
-		+ "World: %.1f, %.1f\n"
-		+ "Cell: %d, %d\n"
+
+func _format_hover_inspector() -> String:
+	var info: Dictionary = StrategicMap.get_cell_debug_info(StrategicMap.last_hover_world_position)
+	if not bool(info.get("has_cell", false)):
+		return "Map Hover: No map cell\nMove over the strategic map to inspect terrain costs."
+
+	var world_position: Vector2 = info["world_position"] as Vector2
+	var cell: Vector2i = info["cell"] as Vector2i
+	var nearby_poi_name: String = str(info.get("nearby_poi_name", ""))
+	if nearby_poi_name.is_empty():
+		nearby_poi_name = "None"
+
+	return (
+		"Map Hover\n"
+		+ "World: %.1f, %.1f  Cell: %d, %d\n"
 		+ "Terrain: %s  Road: %s  Blocked: %s\n"
-		+ "Path points: %d\n"
+		+ "Nearby POI: %s\n"
+		+ "Costs: %s\n"
 		+ "Click map background to command movement."
 	) % [
-		str(entity["display_name"]),
-		str(entity["profile_id"]),
 		world_position.x,
 		world_position.y,
 		cell.x,
 		cell.y,
-		str(context["terrain"]),
-		str(context["has_road"]),
-		str(context["blocked"]),
-		path_points.size(),
+		str(info.get("terrain", "")),
+		_format_bool_yes_no(bool(info.get("has_road", false))),
+		_format_bool_yes_no(bool(info.get("blocked", false))),
+		nearby_poi_name,
+		_format_profile_costs(info.get("profile_costs", {}) as Dictionary),
 	]
+
+
+func _format_profile_costs(profile_costs: Dictionary) -> String:
+	var profile_ids: Array[String] = ["caravan", "army", "survey_party", "work_crew"]
+	var parts: Array[String] = []
+	for profile_id in profile_ids:
+		var cost: float = float(profile_costs.get(profile_id, -1.0))
+		var cost_text: String = "blocked"
+		if cost >= 0.0:
+			cost_text = "%.2f" % cost
+		parts.append("%s=%s" % [profile_id, cost_text])
+	return ", ".join(parts)
+
+
+func _format_bool_yes_no(value: bool) -> String:
+	return "yes" if value else "no"
 
 
 class MapCanvas extends Control:
@@ -1123,6 +1162,13 @@ class MapCanvas extends Control:
 
 
 	func _gui_input(event: InputEvent) -> void:
+		var mouse_motion := event as InputEventMouseMotion
+		if mouse_motion != null:
+			StrategicMap.last_hover_world_position = mouse_motion.position
+			if _main:
+				_main._refresh_map_debug_panel()
+			return
+
 		var mouse_button := event as InputEventMouseButton
 		if mouse_button == null:
 			return
@@ -1143,6 +1189,13 @@ class MapCanvas extends Control:
 		else:
 			var debug: Dictionary = StrategicMap.get_path_debug_summary(StrategicMap.selected_entity_id, destination)
 			EventBus.add_event("[DEBUG] No valid path to selected map destination: %s." % str(debug.get("reason", "unknown")))
+
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_MOUSE_EXIT:
+			StrategicMap.last_hover_world_position = Vector2(-1.0, -1.0)
+			if _main:
+				_main._refresh_map_debug_panel()
 
 
 	func _draw_terrain_grid() -> void:
@@ -1238,6 +1291,13 @@ class EntityOverlay extends Control:
 
 
 	func _gui_input(event: InputEvent) -> void:
+		var mouse_motion := event as InputEventMouseMotion
+		if mouse_motion != null:
+			StrategicMap.last_hover_world_position = mouse_motion.position
+			if _main:
+				_main._refresh_map_debug_panel()
+			return
+
 		var mouse_button := event as InputEventMouseButton
 		if mouse_button == null:
 			return

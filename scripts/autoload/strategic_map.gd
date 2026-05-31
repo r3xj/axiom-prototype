@@ -70,7 +70,7 @@ var cells: Array[Dictionary] = []
 var pois: Dictionary = {}
 var entities: Dictionary = {}
 var selected_entity_id: String = "debug_caravan"
-var last_hover_world_position: Vector2 = Vector2.ZERO
+var last_hover_world_position: Vector2 = Vector2(-1.0, -1.0)
 
 
 func _ready() -> void:
@@ -342,6 +342,44 @@ func get_cell_cost(cell: Vector2i, profile_id: String) -> float:
 	if cost < 0.0:
 		return -1.0
 	return cost
+
+
+func get_cell_debug_info(world_position: Vector2) -> Dictionary:
+	if (
+		world_position.x < 0.0
+		or world_position.y < 0.0
+		or world_position.x >= world_size.x
+		or world_position.y >= world_size.y
+	):
+		return {
+			"has_cell": false,
+			"world_position": world_position,
+		}
+
+	var cell: Vector2i = world_to_cell(world_position)
+	var data: Dictionary = get_cell_data(cell)
+	var profile_costs: Dictionary = {}
+	var profile_ids: Array[String] = ["caravan", "army", "survey_party", "work_crew"]
+	for profile_id in profile_ids:
+		profile_costs[profile_id] = get_cell_cost(cell, profile_id)
+
+	var nearby_poi_id: String = _get_nearby_poi_id(world_position, 42.0)
+	var nearby_poi_name: String = ""
+	if not nearby_poi_id.is_empty() and pois.has(nearby_poi_id):
+		var poi: Dictionary = pois[nearby_poi_id]
+		nearby_poi_name = str(poi.get("display_name", nearby_poi_id))
+
+	return {
+		"has_cell": true,
+		"world_position": world_position,
+		"cell": cell,
+		"terrain": str(data["terrain"]),
+		"has_road": bool(data["has_road"]),
+		"blocked": bool(data["blocked"]),
+		"nearby_poi_id": nearby_poi_id,
+		"nearby_poi_name": nearby_poi_name,
+		"profile_costs": profile_costs,
+	}
 
 
 func cells_to_world_path(path_cells: Array[Vector2i]) -> Array[Vector2]:
