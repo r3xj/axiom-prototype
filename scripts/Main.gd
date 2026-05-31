@@ -9,6 +9,7 @@ var _suppress_refresh: bool = false
 var time_label: Label
 var playback_button: Button
 var speed_label: Label
+var global_status_body: Label
 var info_title: Label
 var info_body: Label
 var economy_body: Label
@@ -104,8 +105,8 @@ func _build_top_bar(parent: Control) -> void:
 	top_bar.add_child(top_bar_content)
 
 	var title := Label.new()
-	title.text = "AXIOM Prototype — Phase 1A"
-	title.custom_minimum_size = Vector2(230, 0)
+	title.text = "AXIOM Prototype"
+	title.custom_minimum_size = Vector2(160, 0)
 	top_bar_content.add_child(title)
 
 	time_label = Label.new()
@@ -150,6 +151,12 @@ func _build_top_bar(parent: Control) -> void:
 	advance_24h_button.text = "+24h"
 	advance_24h_button.pressed.connect(_advance_hours.bind(24))
 	top_bar_content.add_child(advance_24h_button)
+
+	global_status_body = Label.new()
+	global_status_body.text = ""
+	global_status_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	global_status_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	top_bar_content.add_child(global_status_body)
 
 
 func _build_body(parent: Control) -> void:
@@ -215,13 +222,12 @@ func _build_side_panel(parent: Control) -> void:
 	side_panel.add_theme_constant_override("separation", 8)
 	side_scroll.add_child(side_panel)
 
+	_build_selected_entity_panel(side_panel)
 	_build_region_info_panel(side_panel)
 	_build_prospects_panel(side_panel)
+	_build_projects_panel(side_panel)
 	_build_codex_panel(side_panel)
 	_build_economy_panel(side_panel)
-	_build_selected_entity_panel(side_panel)
-	_build_projects_panel(side_panel)
-	_build_shipments_panel(side_panel)
 	_build_event_log_panel(side_panel)
 
 	if DEBUG_MODE:
@@ -239,7 +245,7 @@ func _build_region_info_panel(parent: Control) -> void:
 	info_panel.add_child(info_content)
 
 	info_title = Label.new()
-	info_title.text = "Select a region"
+	info_title.text = "Selected Location"
 	info_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	info_content.add_child(info_title)
 
@@ -265,7 +271,7 @@ func _build_prospects_panel(parent: Control) -> void:
 	prospects_panel.add_child(prospects_content)
 
 	var prospects_title := Label.new()
-	prospects_title.text = "Prospects"
+	prospects_title.text = "Location Sites & Actions"
 	prospects_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	prospects_content.add_child(prospects_title)
 
@@ -291,7 +297,7 @@ func _build_economy_panel(parent: Control) -> void:
 	economy_panel.add_child(economy_content)
 
 	var economy_title := Label.new()
-	economy_title.text = "Hearthmere Economy"
+	economy_title.text = "Hearthmere Details"
 	economy_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	economy_content.add_child(economy_title)
 
@@ -327,7 +333,7 @@ func _build_projects_panel(parent: Control) -> void:
 	projects_panel.add_child(projects_content)
 
 	var projects_title := Label.new()
-	projects_title.text = "Active Projects / Movement"
+	projects_title.text = "Active Operations / Movement"
 	projects_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	projects_content.add_child(projects_title)
 
@@ -348,7 +354,7 @@ func _build_selected_entity_panel(parent: Control) -> void:
 	selected_panel.add_child(selected_content)
 
 	var selected_title := Label.new()
-	selected_title.text = "Selected Entity"
+	selected_title.text = "Selected Entity Context"
 	selected_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	selected_content.add_child(selected_title)
 
@@ -461,6 +467,7 @@ func _get_unassigned_labor_teams() -> int:
 
 func _refresh_all_ui() -> void:
 	_refresh_time_label()
+	_refresh_global_status_bar()
 	_refresh_region_panel()
 	_refresh_region_buttons()
 	_refresh_prospects_panel()
@@ -483,6 +490,38 @@ func _refresh_playback_controls() -> void:
 		playback_button.text = "Play" if SimClock.is_paused else "Pause"
 	if speed_label:
 		speed_label.text = "%.0fx" % SimClock.speed_multiplier
+	_refresh_global_status_bar()
+
+
+func _refresh_global_status_bar() -> void:
+	if not global_status_body:
+		return
+
+	var total_labor_teams: int = GameState.get_total_labor_teams()
+	var unassigned_labor_teams: int = _get_unassigned_labor_teams()
+	var field_crew_labor_teams: int = GameState.get_field_crew_labor_teams()
+	var stockpile: Dictionary = GameState.hearthmere["stockpile"]
+	var supplies: float = StockpileSystem.get_good_amount(stockpile, "supplies")
+	var redglass_ore: float = StockpileSystem.get_good_amount(stockpile, "redglass_ore")
+	var redglass_status: String = "Unknown"
+	if CodexSystem.redglass_tested:
+		redglass_status = "Tested"
+	elif CodexSystem.redglass_known:
+		redglass_status = "Known"
+
+	var playback_text: String = "Paused" if SimClock.is_paused else "Running"
+	global_status_body.text = (
+		"%s | Labor %d/%d free | Field Crews %d | Supplies %.0f | Redglass Ore %.0f | Redglass %s"
+		% [
+			playback_text,
+			unassigned_labor_teams,
+			total_labor_teams,
+			field_crew_labor_teams,
+			supplies,
+			redglass_ore,
+			redglass_status,
+		]
+	)
 
 
 func _refresh_region_panel() -> void:
@@ -711,18 +750,22 @@ func _refresh_economy_panel() -> void:
 
 
 func _refresh_projects_panel() -> void:
-	if ProjectSystem.active_projects.is_empty():
-		projects_body.text = "No active projects or crews."
+	if ProjectSystem.active_projects.is_empty() and LogisticsSystem.active_shipments.is_empty():
+		projects_body.text = "No active operations or movement."
 		return
 
 	var text := ""
 	for project in ProjectSystem.active_projects:
 		text += "%s\n" % _format_project_activity(project)
+	for shipment in LogisticsSystem.active_shipments:
+		text += "%s\n" % _format_shipment_activity(shipment)
 
 	projects_body.text = text.strip_edges()
 
 
 func _refresh_shipments_panel() -> void:
+	if not shipments_body:
+		return
 	if LogisticsSystem.active_shipments.is_empty():
 		shipments_body.text = "No active shipments."
 		return
@@ -1006,7 +1049,7 @@ func _build_debug_panel(parent: Control) -> void:
 	debug_panel.add_child(debug_content)
 
 	var debug_title := Label.new()
-	debug_title.text = "[DEBUG] Debug Tools"
+	debug_title.text = "Debug Tools / Map Inspector"
 	debug_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	debug_content.add_child(debug_title)
 
