@@ -2,6 +2,9 @@ extends Node
 
 signal state_changed
 
+# Phase 1B compatibility: these are shipment plan options shown to the player,
+# not hard movement rails. Strategic caravan pathing is authoritative whenever
+# a caravan path can be assigned; travel_hours remains only as timer fallback.
 const ROUTES: Dictionary = {
 	"ashen_pass": {
 		"name": "Ashen Pass",
@@ -84,6 +87,7 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 	var source_position: Vector2 = _get_world_position_for_location(source_id)
 	var destination_position: Vector2 = _get_world_position_for_location(destination_id)
 	StrategicMap.create_entity(entity_id, "Shipment Caravan", "caravan", source_position)
+	# Compatibility fallback ETA if the strategic caravan cannot path.
 	var total_hours: int = int(route["travel_hours"])
 	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
 	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
@@ -94,6 +98,8 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 			"shipment_id": shipment_id,
 			"source_id": source_id,
 			"destination_id": destination_id,
+			"shipment_plan_id": route_id,
+			"shipment_plan_name": str(route["name"]),
 		})
 	else:
 		StrategicMap.remove_entity(entity_id)
@@ -123,7 +129,7 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 
 	active_shipments.append(shipment)
 
-	EventBus.add_event("Shipment dispatched: %s via %s." % [shipment["title"], route["name"]])
+	EventBus.add_event("Shipment dispatched: %s using %s plan." % [shipment["title"], route["name"]])
 	emit_signal("state_changed")
 
 func _advance_shipments_for_one_hour() -> void:

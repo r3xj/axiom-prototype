@@ -751,13 +751,13 @@ func _refresh_prospects_panel() -> void:
 			)
 
 			var btn_ashen := Button.new()
-			btn_ashen.text = "Ship Supplies: Ashen Pass"
+			btn_ashen.text = "Ship Supplies: Ashen Plan"
 			btn_ashen.disabled = not can_dispatch
 			btn_ashen.pressed.connect(LogisticsSystem.start_shipment.bind("hearthmere", prospect_id, "ashen_pass", {"supplies": LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT}))
 			prospect_buttons_box.add_child(btn_ashen)
 
 			var btn_pine := Button.new()
-			btn_pine.text = "Ship Supplies: Old Pine Road"
+			btn_pine.text = "Ship Supplies: Old Pine Plan"
 			btn_pine.disabled = not can_dispatch
 			btn_pine.pressed.connect(LogisticsSystem.start_shipment.bind("hearthmere", prospect_id, "old_pine_road", {"supplies": LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT}))
 			prospect_buttons_box.add_child(btn_pine)
@@ -772,7 +772,7 @@ func _refresh_prospects_panel() -> void:
 				var ore_display: String = CodexSystem.get_display_name(produces)
 
 				var btn_ore_ashen := Button.new()
-				btn_ore_ashen.text = "Ship %s: Ashen Pass" % ore_display
+				btn_ore_ashen.text = "Ship %s: Ashen Plan" % ore_display
 				btn_ore_ashen.disabled = not can_ship_ore
 				var ore_cargo_a: Dictionary = {}
 				ore_cargo_a[produces] = LogisticsSystem.SHIPMENT_ORE_AMOUNT
@@ -780,7 +780,7 @@ func _refresh_prospects_panel() -> void:
 				prospect_buttons_box.add_child(btn_ore_ashen)
 
 				var btn_ore_pine := Button.new()
-				btn_ore_pine.text = "Ship %s: Old Pine Road" % ore_display
+				btn_ore_pine.text = "Ship %s: Old Pine Plan" % ore_display
 				btn_ore_pine.disabled = not can_ship_ore
 				var ore_cargo_p: Dictionary = {}
 				ore_cargo_p[produces] = LogisticsSystem.SHIPMENT_ORE_AMOUNT
@@ -1053,9 +1053,9 @@ func _format_shipment_activity(shipment: Dictionary) -> String:
 	var remaining_hours: int = _get_shipment_remaining_hours(shipment)
 	var status_text: String = "In transit"
 	if not bool(shipment.get("uses_strategic_entity", false)):
-		status_text = "In transit by route timer"
+		status_text = "Compatibility timer fallback"
 
-	return "%s Caravan: %s -> %s via %s, %s, ETA ~%s" % [
+	return "%s Caravan: %s -> %s, Plan: %s, %s, ETA ~%s" % [
 		cargo_summary,
 		source_name,
 		destination_name,
