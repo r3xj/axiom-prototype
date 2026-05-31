@@ -42,11 +42,6 @@ func start_survey_project(prospect_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):
 		return
 
-	if _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST:
-		EventBus.add_event("No unassigned labor team is available to form a field crew.")
-		emit_signal("state_changed")
-		return
-
 	var prospect: Dictionary = GameState.prospects[prospect_id]
 	if prospect["status"] != "unsurveyed":
 		return
@@ -56,53 +51,86 @@ func start_survey_project(prospect_id: String) -> void:
 		emit_signal("state_changed")
 		return
 
-	var entity_id: String = "field_crew_survey_%s_%d" % [prospect_id, SimClock.game_hour]
-	var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
+	var project_id: String = "survey_%s" % prospect_id
 	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
-	GameState.reserve_field_crew_labor()
-	StrategicMap.create_entity(entity_id, "Field Crew: %s Survey" % str(prospect["name"]), "field_crew", source_position)
-	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
-	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
-	if not path_assigned:
-		StrategicMap.remove_entity(entity_id)
-		GameState.release_field_crew_labor()
-		EventBus.add_event("Cannot survey %s: no valid expedition path (%s)." % [
-			str(prospect["name"]),
-			str(path_debug.get("reason", "unknown")),
-		])
-		emit_signal("state_changed")
-		return
+	var entity_id: String = _find_available_field_crew_for_site(prospect_id, destination_position)
+	var reused_field_crew: bool = not entity_id.is_empty()
+	var previous_entity_metadata: Dictionary = {}
+	var previous_display_name: String = ""
+	if reused_field_crew:
+		var previous_entity: Dictionary = StrategicMap.entities[entity_id]
+		previous_entity_metadata = (previous_entity.get("metadata", {}) as Dictionary).duplicate(true)
+		previous_display_name = str(previous_entity.get("display_name", "Field Crew"))
+		StrategicMap.set_entity_display_name(entity_id, "Field Crew: %s Survey" % str(prospect["name"]))
+		EventBus.add_event("[DEBUG] Reusing idle field crew for survey: %s." % str(prospect["name"]))
+	else:
+		if _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST:
+			EventBus.add_event("No unassigned labor team is available to form a field crew.")
+			emit_signal("state_changed")
+			return
+		entity_id = "field_crew_survey_%s_%d" % [prospect_id, SimClock.game_hour]
+		var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
+		GameState.reserve_field_crew_labor()
+		StrategicMap.create_entity(entity_id, "Field Crew: %s Survey" % str(prospect["name"]), "field_crew", source_position)
 
-	var estimated_hours: int = StrategicMap.estimate_path_hours(entity_id)
 	StrategicMap.set_entity_metadata(entity_id, {
 		"kind": "survey_expedition",
-		"project_id": "survey_%s" % prospect_id,
+		"project_id": project_id,
 		"prospect_id": prospect_id,
 	})
+
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	var crew_position: Vector2 = entity["world_position"] as Vector2
+	var is_at_site: bool = crew_position.distance_to(destination_position) <= FIELD_CREW_SITE_RADIUS
+	var estimated_hours: int = 0
+	var uses_strategic_entity: bool = false
+	if not is_at_site:
+		var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
+		var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
+		if not path_assigned:
+			if reused_field_crew:
+				StrategicMap.set_entity_display_name(entity_id, previous_display_name)
+				StrategicMap.set_entity_metadata(entity_id, previous_entity_metadata)
+			else:
+				StrategicMap.remove_entity(entity_id)
+				GameState.release_field_crew_labor()
+			EventBus.add_event("Cannot survey %s: no valid expedition path (%s)." % [
+				str(prospect["name"]),
+				str(path_debug.get("reason", "unknown")),
+			])
+			emit_signal("state_changed")
+			return
+
+		estimated_hours = StrategicMap.estimate_path_hours(entity_id)
+		uses_strategic_entity = true
+		EventBus.add_event("[DEBUG] Survey expedition path assigned: %s path=%d eta=%s." % [
+			str(prospect["name"]),
+			int(path_debug.get("path_length", 0)),
+			"%dh" % estimated_hours,
+		])
 
 	prospect["status"] = "surveying"
 	GameState.prospects[prospect_id] = prospect
 
 	var project: Dictionary = {
-		"id": "survey_%s" % prospect_id,
+		"id": project_id,
 		"type": "survey_expedition",
-		"state": "traveling_to_site",
+		"state": "traveling_to_site" if uses_strategic_entity else "surveying_on_site",
 		"target_id": prospect_id,
 		"entity_id": entity_id,
-		"title": "Field Crew Survey: %s" % prospect["name"],
-		"remaining_hours": estimated_hours,
-		"total_hours": estimated_hours,
+		"title": "Field Crew Survey: %s" % prospect["name"] if uses_strategic_entity else "Surveying On Site: %s" % str(prospect["name"]),
+		"remaining_hours": estimated_hours if uses_strategic_entity else int(prospect["survey_hours"]),
+		"total_hours": estimated_hours if uses_strategic_entity else int(prospect["survey_hours"]),
 		"labor_teams": 0,
-		"uses_strategic_entity": true,
+		"uses_strategic_entity": uses_strategic_entity,
 	}
 	active_projects.append(project)
 
-	EventBus.add_event("[DEBUG] Survey expedition path assigned: %s path=%d eta=%s." % [
-		str(prospect["name"]),
-		int(path_debug.get("path_length", 0)),
-		"%dh" % estimated_hours,
-	])
-	EventBus.add_event("Field crew dispatched to survey: %s." % prospect["name"])
+	if uses_strategic_entity:
+		EventBus.add_event("Field crew dispatched to survey: %s." % prospect["name"])
+	else:
+		EventBus.add_event("[DEBUG] Field crew already at survey site; survey work started: %s." % str(prospect["name"]))
+		EventBus.add_event("Field crew started surveying: %s." % prospect["name"])
 	emit_signal("state_changed")
 
 func start_establish_mine_project(prospect_id: String) -> void:

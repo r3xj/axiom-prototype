@@ -594,7 +594,10 @@ func _refresh_prospects_panel() -> void:
 		if status == "unsurveyed":
 			var button := Button.new()
 			button.text = "Dispatch Field Crew to Survey: %s (1 field crew)" % prospect["name"]
-			button.disabled = _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST
+			button.disabled = (
+				not ProjectSystem.has_available_field_crew_for_site(prospect_id)
+				and _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST
+			)
 			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
