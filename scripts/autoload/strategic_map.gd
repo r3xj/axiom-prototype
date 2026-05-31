@@ -49,6 +49,18 @@ const MOVEMENT_PROFILES: Dictionary = {
 		},
 		"road_multiplier": 0.5,
 	},
+	"work_crew": {
+		"display_name": "Work Crew",
+		"world_units_per_sim_hour": 24.0,
+		"terrain_costs": {
+			"plains": 1.2,
+			"forest": 2.8,
+			"hills": 2.8,
+			"mountain": 5.0,
+			"water": -1.0,
+		},
+		"road_multiplier": 0.45,
+	},
 }
 
 var world_size: Vector2 = Vector2.ZERO

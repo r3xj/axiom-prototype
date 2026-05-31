@@ -537,6 +537,10 @@ func _refresh_prospects_panel() -> void:
 
 		if status == "surveyed":
 			text += "Result: %s\n" % prospect["result_text"]
+		elif status == "claiming":
+			text += "A claim crew is working toward securing this deposit.\n"
+		elif status == "claimed":
+			text += "Deposit claimed. Mine establishment can begin.\n"
 		elif status == "mine_building":
 			text += "A mine is under construction here.\n"
 		elif status == "mine_operational":
@@ -562,7 +566,13 @@ func _refresh_prospects_panel() -> void:
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
 			var button := Button.new()
-			button.text = "Establish Mine: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
+			button.text = "Dispatch Claim Crew: %s (1 labor)" % prospect["name"]
+			button.disabled = _get_unassigned_labor_teams() < 1
+			button.pressed.connect(ProjectSystem.start_claim_deposit_project.bind(prospect_id))
+			prospect_buttons_box.add_child(button)
+		elif status == "claimed" and str(prospect["outcome"]) == "redglass_deposit":
+			var button := Button.new()
+			button.text = "Dispatch Mine Work Crew: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
 			button.disabled = _get_unassigned_labor_teams() < 2
 			button.pressed.connect(ProjectSystem.start_establish_mine_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
@@ -784,6 +794,10 @@ func _format_prospect_status(status: String) -> String:
 			return "Surveying"
 		"surveyed":
 			return "Surveyed"
+		"claiming":
+			return "Claiming"
+		"claimed":
+			return "Claimed"
 		"mine_building":
 			return "Mine under construction"
 		"mine_operational":
@@ -1190,6 +1204,8 @@ class EntityOverlay extends Control:
 				color = Color(0.92, 0.22, 0.22)
 			elif profile_id == "survey_party":
 				color = Color(0.36, 0.95, 0.78)
+			elif profile_id == "work_crew":
+				color = Color(0.47, 0.58, 1.0)
 			if str(entity_id) == StrategicMap.selected_entity_id:
 				draw_circle(pos, 10.0, Color(1.0, 1.0, 1.0, 0.65))
 			draw_circle(pos, 7.0, color)
