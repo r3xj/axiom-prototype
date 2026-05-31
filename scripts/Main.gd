@@ -22,6 +22,7 @@ var supply_minus_button: Button
 var supply_plus_button: Button
 var codex_body: Label
 var selected_entity_body: Label
+var selected_entity_actions_box: VBoxContainer
 var map_debug_body: Label
 
 var region_buttons: Dictionary = {}
@@ -66,6 +67,8 @@ func _on_strategic_map_changed() -> void:
 		_entity_overlay.queue_redraw()
 	if selected_entity_body:
 		_refresh_selected_entity_panel()
+	if selected_entity_actions_box:
+		_refresh_selected_entity_actions()
 	if map_debug_body:
 		_refresh_map_debug_panel()
 
@@ -1036,6 +1039,11 @@ func _build_debug_panel(parent: Control) -> void:
 	selected_entity_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	debug_content.add_child(selected_entity_body)
 
+	selected_entity_actions_box = VBoxContainer.new()
+	selected_entity_actions_box.name = "SelectedEntityActions"
+	selected_entity_actions_box.add_theme_constant_override("separation", 6)
+	debug_content.add_child(selected_entity_actions_box)
+
 	var btn_caravan := Button.new()
 	btn_caravan.text = "[D] Select Caravan"
 	btn_caravan.pressed.connect(_debug_select_map_entity.bind("debug_caravan"))
@@ -1126,9 +1134,54 @@ func _refresh_selected_entity_panel() -> void:
 	var entity_id: String = StrategicMap.selected_entity_id
 	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
 		selected_entity_body.text = "No entity selected."
+		_refresh_selected_entity_actions()
 		return
 
 	selected_entity_body.text = _format_selected_entity_info(entity_id)
+	_refresh_selected_entity_actions()
+
+
+func _refresh_selected_entity_actions() -> void:
+	if not selected_entity_actions_box:
+		return
+
+	_clear_container_children(selected_entity_actions_box)
+	if not _is_selected_idle_work_crew():
+		return
+
+	var disband_button := Button.new()
+	disband_button.text = "Disband Work Crew"
+	disband_button.pressed.connect(_disband_selected_idle_work_crew)
+	selected_entity_actions_box.add_child(disband_button)
+
+
+func _is_selected_idle_work_crew() -> bool:
+	var entity_id: String = StrategicMap.selected_entity_id
+	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
+		return false
+
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	if str(entity.get("profile_id", "")) != "work_crew":
+		return false
+	if not _find_project_for_entity(entity_id).is_empty():
+		return false
+
+	var path_points: Array = entity["path_points"]
+	if not path_points.is_empty():
+		return false
+
+	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
+	return str(metadata.get("state", "")) == "idle"
+
+
+func _disband_selected_idle_work_crew() -> void:
+	if not _is_selected_idle_work_crew():
+		return
+
+	var entity_id: String = StrategicMap.selected_entity_id
+	StrategicMap.remove_entity(entity_id)
+	EventBus.add_event("Work crew disbanded. Prototype note: no population or labor totals changed.")
+	_refresh_all_ui()
 
 
 func _format_selected_entity_info(entity_id: String) -> String:
@@ -1187,15 +1240,20 @@ func _get_selected_entity_state_text(entity: Dictionary, metadata: Dictionary, i
 	if not shipment.is_empty():
 		return "In transit"
 
+	if is_moving:
+		return "Traveling"
+
 	if str(metadata.get("state", "")) == "idle":
 		return "Idle"
 
-	if is_moving:
-		return "Traveling"
 	return "Idle"
 
 
 func _get_selected_entity_destination_text(entity: Dictionary, metadata: Dictionary, is_moving: bool) -> String:
+	if is_moving:
+		var target_position: Vector2 = entity["target_world_position"] as Vector2
+		return "World %.1f, %.1f" % [target_position.x, target_position.y]
+
 	var destination_id: String = str(metadata.get("destination_id", ""))
 	if destination_id.is_empty():
 		destination_id = str(metadata.get("prospect_id", ""))
@@ -1214,9 +1272,6 @@ func _get_selected_entity_destination_text(entity: Dictionary, metadata: Diction
 	if not shipment.is_empty():
 		return LogisticsSystem.get_location_name(str(shipment.get("destination", "")))
 
-	if is_moving:
-		var target_position: Vector2 = entity["target_world_position"] as Vector2
-		return "World %.1f, %.1f" % [target_position.x, target_position.y]
 	return "None"
 
 
@@ -1272,6 +1327,28 @@ func _find_shipment_for_entity(entity_id: String, metadata: Dictionary) -> Dicti
 		if not shipment_id.is_empty() and str(shipment.get("id", "")) == shipment_id:
 			return shipment
 	return {}
+
+
+func _mark_selected_idle_work_crew_moving(destination: Vector2) -> void:
+	var entity_id: String = StrategicMap.selected_entity_id
+	if entity_id.is_empty() or not StrategicMap.entities.has(entity_id):
+		return
+
+	var entity: Dictionary = StrategicMap.entities[entity_id]
+	if str(entity.get("profile_id", "")) != "work_crew":
+		return
+
+	var metadata: Dictionary = entity.get("metadata", {}) as Dictionary
+	if str(metadata.get("state", "")) != "idle":
+		return
+	if not _find_project_for_entity(entity_id).is_empty():
+		return
+
+	metadata.erase("site_id")
+	metadata.erase("site_name")
+	metadata["last_order"] = "move"
+	StrategicMap.set_entity_metadata(entity_id, metadata)
+	EventBus.add_event("Idle work crew moving to %.0f, %.0f." % [destination.x, destination.y])
 
 
 func _format_hover_inspector() -> String:
@@ -1347,6 +1424,8 @@ class MapCanvas extends Control:
 		var destination: Vector2 = StrategicMap.clamp_world_position(mouse_button.position)
 		var moved: bool = StrategicMap.command_selected_entity(destination)
 		if moved:
+			if _main:
+				_main._mark_selected_idle_work_crew_moving(destination)
 			var context: Dictionary = StrategicMap.get_tactical_context(destination)
 			EventBus.add_event("[DEBUG] Move command: %s to %s cell %s." % [
 				StrategicMap.selected_entity_id,
@@ -1354,6 +1433,7 @@ class MapCanvas extends Control:
 				str(context["cell"]),
 			])
 			if _main:
+				_main._refresh_selected_entity_panel()
 				_main._refresh_map_debug_panel()
 		else:
 			var debug: Dictionary = StrategicMap.get_path_debug_summary(StrategicMap.selected_entity_id, destination)
