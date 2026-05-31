@@ -147,6 +147,7 @@ func _make_entity(entity_id: String, display_name: String, profile_id: String, w
 		"path_points": [],
 		"path_index": 0,
 		"speed": float(profile["speed"]),
+		"movement_debug_logged": false,
 	}
 
 
@@ -186,13 +187,17 @@ func command_entity_to_poi(entity_id: String, poi_id: String) -> bool:
 
 func command_entity_to_world_position(entity_id: String, destination_world_position: Vector2) -> bool:
 	if not entities.has(entity_id):
+		EventBus.add_event("[DEBUG] Move failed: unknown entity %s." % entity_id)
 		return false
 
 	var entity: Dictionary = entities[entity_id]
 	var profile_id: String = str(entity["profile_id"])
 	var entity_position: Vector2 = entity["world_position"] as Vector2
-	var path_cells: Array[Vector2i] = find_path(world_to_cell(entity_position), world_to_cell(destination_world_position), profile_id)
+	var start_cell: Vector2i = world_to_cell(entity_position)
+	var goal_cell: Vector2i = world_to_cell(destination_world_position)
+	var path_cells: Array[Vector2i] = find_path(start_cell, goal_cell, profile_id)
 	if path_cells.is_empty():
+		_log_caravan_path_debug(entity_id, profile_id, entity_position, destination_world_position, start_cell, goal_cell, path_cells, false)
 		return false
 
 	var path_points: Array[Vector2] = cells_to_world_path(path_cells)
@@ -200,7 +205,9 @@ func command_entity_to_world_position(entity_id: String, destination_world_posit
 	entity["target_world_position"] = clamp_world_position(destination_world_position)
 	entity["path_points"] = path_points
 	entity["path_index"] = 0
+	entity["movement_debug_logged"] = false
 	entities[entity_id] = entity
+	_log_caravan_path_debug(entity_id, profile_id, entity_position, destination_world_position, start_cell, goal_cell, path_cells, true)
 	emit_signal("entity_changed")
 	return true
 
@@ -289,11 +296,13 @@ func get_cell_cost(cell: Vector2i, profile_id: String) -> float:
 	var terrain: String = str(data["terrain"])
 	var profile: Dictionary = MOVEMENT_PROFILES[profile_id]
 	var terrain_costs: Dictionary = profile["terrain_costs"]
+	if bool(data["has_road"]):
+		var road_cost: float = float(terrain_costs.get(TERRAIN_PLAINS, 1.0)) * float(profile["road_multiplier"])
+		return maxf(road_cost, 0.05)
+
 	var cost: float = float(terrain_costs.get(terrain, -1.0))
 	if cost < 0.0:
 		return -1.0
-	if bool(data["has_road"]):
-		cost *= float(profile["road_multiplier"])
 	return cost
 
 
@@ -390,6 +399,7 @@ func _advance_entity(entity_id: String, delta: float) -> bool:
 
 	var remaining_distance: float = float(entity["speed"]) * delta
 	var world_position: Vector2 = entity["world_position"] as Vector2
+	var starting_position: Vector2 = world_position
 
 	while remaining_distance > 0.0 and path_index < path_points.size():
 		var target: Vector2 = path_points[path_index] as Vector2
@@ -410,6 +420,15 @@ func _advance_entity(entity_id: String, delta: float) -> bool:
 
 	entity["world_position"] = world_position
 	entity["path_index"] = path_index
+	if str(entity["profile_id"]) == "caravan" and not bool(entity.get("movement_debug_logged", false)):
+		entity["movement_debug_logged"] = true
+		EventBus.add_event("[DEBUG] Caravan advancing: id=%s from=%s to=%s path_index=%d/%d." % [
+			entity_id,
+			str(starting_position.round()),
+			str(world_position.round()),
+			path_index,
+			path_points.size(),
+		])
 	if path_index >= path_points.size():
 		entity["path_points"] = []
 		entity["path_index"] = 0
@@ -433,6 +452,101 @@ func get_tactical_context(world_position: Vector2) -> Dictionary:
 		"nearby_poi": nearby_poi,
 		"context_type": context_type,
 	}
+
+
+func get_path_debug_summary(entity_id: String, destination_world_position: Vector2) -> Dictionary:
+	if not entities.has(entity_id):
+		return {
+			"entity_id": entity_id,
+			"exists": false,
+			"reason": "unknown_entity",
+		}
+
+	var entity: Dictionary = entities[entity_id]
+	var profile_id: String = str(entity["profile_id"])
+	var start_world: Vector2 = entity["world_position"] as Vector2
+	var destination_world: Vector2 = clamp_world_position(destination_world_position)
+	var start_cell: Vector2i = world_to_cell(start_world)
+	var goal_cell: Vector2i = world_to_cell(destination_world)
+	var path_cells: Array[Vector2i] = find_path(start_cell, goal_cell, profile_id)
+
+	return {
+		"entity_id": entity_id,
+		"exists": true,
+		"profile_id": profile_id,
+		"start_world": start_world,
+		"destination_world": destination_world,
+		"start_cell": start_cell,
+		"destination_cell": goal_cell,
+		"start_valid": is_cell_in_bounds(start_cell),
+		"destination_valid": is_cell_in_bounds(goal_cell),
+		"start_cost": get_cell_cost(start_cell, profile_id),
+		"destination_cost": get_cell_cost(goal_cell, profile_id),
+		"start_passable": get_cell_cost(start_cell, profile_id) >= 0.0,
+		"destination_passable": get_cell_cost(goal_cell, profile_id) >= 0.0,
+		"path_length": path_cells.size(),
+		"reason": _get_path_failure_reason(start_cell, goal_cell, profile_id, path_cells),
+	}
+
+
+func _log_caravan_path_debug(
+	entity_id: String,
+	profile_id: String,
+	start_world: Vector2,
+	destination_world: Vector2,
+	start_cell: Vector2i,
+	goal_cell: Vector2i,
+	path_cells: Array[Vector2i],
+	assigned: bool
+) -> void:
+	if profile_id != "caravan":
+		return
+
+	var start_valid: bool = is_cell_in_bounds(start_cell)
+	var goal_valid: bool = is_cell_in_bounds(goal_cell)
+	var start_cost: float = get_cell_cost(start_cell, profile_id)
+	var goal_cost: float = get_cell_cost(goal_cell, profile_id)
+	var reason: String = _get_path_failure_reason(start_cell, goal_cell, profile_id, path_cells)
+	EventBus.add_event(
+		"[DEBUG] Caravan path: id=%s profile=%s start=%s dest=%s start_cell=%s dest_cell=%s valid=%s/%s passable=%s/%s cost=%.2f/%.2f path=%d assigned=%s reason=%s."
+		% [
+			entity_id,
+			profile_id,
+			str(start_world.round()),
+			str(clamp_world_position(destination_world).round()),
+			str(start_cell),
+			str(goal_cell),
+			str(start_valid),
+			str(goal_valid),
+			str(start_cost >= 0.0),
+			str(goal_cost >= 0.0),
+			start_cost,
+			goal_cost,
+			path_cells.size(),
+			str(assigned),
+			reason,
+		]
+	)
+
+
+func _get_path_failure_reason(start_cell: Vector2i, goal_cell: Vector2i, profile_id: String, path_cells: Array[Vector2i]) -> String:
+	if not is_cell_in_bounds(start_cell):
+		return "invalid_start"
+	if not is_cell_in_bounds(goal_cell):
+		return "invalid_destination"
+	var start_data: Dictionary = get_cell_data(start_cell)
+	var goal_data: Dictionary = get_cell_data(goal_cell)
+	if bool(start_data["blocked"]):
+		return "blocked_start"
+	if bool(goal_data["blocked"]):
+		return "blocked_destination"
+	if get_cell_cost(start_cell, profile_id) < 0.0:
+		return "start_blocked_by_profile"
+	if get_cell_cost(goal_cell, profile_id) < 0.0:
+		return "destination_blocked_by_profile"
+	if path_cells.is_empty():
+		return "no_route"
+	return "ok"
 
 
 func _get_nearby_poi_id(world_position: Vector2, max_distance: float) -> String:

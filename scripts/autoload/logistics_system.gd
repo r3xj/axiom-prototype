@@ -83,7 +83,13 @@ func start_shipment(source_id: String, destination_id: String, route_id: String,
 	var destination_position: Vector2 = _get_world_position_for_location(destination_id)
 	StrategicMap.create_entity(entity_id, "Shipment Caravan", "caravan", source_position)
 	var total_hours: int = int(route["travel_hours"])
-	StrategicMap.command_entity_to_world_position(entity_id, destination_position)
+	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
+	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
+	EventBus.add_event("[DEBUG] Shipment caravan path assigned=%s reason=%s path=%d." % [
+		str(path_assigned),
+		str(path_debug.get("reason", "unknown")),
+		int(path_debug.get("path_length", 0)),
+	])
 
 	var shipment: Dictionary = {
 		"id": shipment_id,

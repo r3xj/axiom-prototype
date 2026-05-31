@@ -1015,7 +1015,8 @@ class MapCanvas extends Control:
 			if _main:
 				_main._refresh_map_debug_panel()
 		else:
-			EventBus.add_event("[DEBUG] No valid path to selected map destination.")
+			var debug: Dictionary = StrategicMap.get_path_debug_summary(StrategicMap.selected_entity_id, destination)
+			EventBus.add_event("[DEBUG] No valid path to selected map destination: %s." % str(debug.get("reason", "unknown")))
 
 
 	func _draw_terrain_grid() -> void:
