@@ -453,6 +453,7 @@ func _change_supply_labor(delta: int) -> void:
 func _get_unassigned_labor_teams() -> int:
 	var assigned: int = (GameState.supply_production_labor_teams
 		+ ProjectSystem.get_project_labor_teams()
+		+ GameState.get_field_crew_labor_teams()
 		+ LogisticsSystem.get_shipment_labor_teams()
 		+ GameState.get_mine_worker_teams())
 	return max(0, GameState.get_total_labor_teams() - assigned)
@@ -592,14 +593,17 @@ func _refresh_prospects_panel() -> void:
 
 		if status == "unsurveyed":
 			var button := Button.new()
-			button.text = "Dispatch Field Crew to Survey: %s (1 labor)" % prospect["name"]
-			button.disabled = _get_unassigned_labor_teams() <= 0
+			button.text = "Dispatch Field Crew to Survey: %s (1 field crew)" % prospect["name"]
+			button.disabled = _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST
 			button.pressed.connect(ProjectSystem.start_survey_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "surveyed" and str(prospect["outcome"]) == "redglass_deposit":
 			var button := Button.new()
-			button.text = "Dispatch Field Crew to Establish Mine: %s (2d, 2 labor, 1.0 supply/h)" % prospect["name"]
-			button.disabled = _get_unassigned_labor_teams() < 2
+			button.text = "Dispatch Field Crew to Establish Mine: %s (2d, 1 field crew, 1.0 supply/h)" % prospect["name"]
+			button.disabled = (
+				not ProjectSystem.has_available_field_crew_for_site(prospect_id)
+				and _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST
+			)
 			button.pressed.connect(ProjectSystem.start_establish_mine_project.bind(prospect_id))
 			prospect_buttons_box.add_child(button)
 		elif status == "mine_operational":
@@ -666,6 +670,7 @@ func _refresh_prospects_panel() -> void:
 func _refresh_economy_panel() -> void:
 	var total_labor_teams: int = GameState.get_total_labor_teams()
 	var project_labor_teams: int = ProjectSystem.get_project_labor_teams()
+	var field_crew_labor_teams: int = GameState.get_field_crew_labor_teams()
 	var shipment_labor_teams: int = LogisticsSystem.get_shipment_labor_teams()
 	var mine_worker_teams: int = GameState.get_mine_worker_teams()
 	var unassigned_labor_teams: int = _get_unassigned_labor_teams()
@@ -673,8 +678,11 @@ func _refresh_economy_panel() -> void:
 
 	var labor_block := "LABOR\n"
 	labor_block += "Total: %d  |  Unassigned: %d\n" % [total_labor_teams, unassigned_labor_teams]
-	labor_block += "Supply: %d  |  Projects: %d  |  Shipments: %d  |  Mine: %d\n" % [
-		GameState.supply_production_labor_teams, project_labor_teams, shipment_labor_teams, mine_worker_teams,
+	labor_block += "Supply: %d  |  Projects: %d  |  Field Crews: %d\n" % [
+		GameState.supply_production_labor_teams, project_labor_teams, field_crew_labor_teams,
+	]
+	labor_block += "Shipments: %d  |  Mine: %d\n" % [
+		shipment_labor_teams, mine_worker_teams,
 	]
 	labor_block += "Supply output: %.1f / day" % daily_supply_output
 
@@ -729,6 +737,8 @@ func _format_project_activity(project: Dictionary) -> String:
 	var target_id: String = str(project.get("target_id", ""))
 	var target_name: String = _get_activity_location_name(target_id)
 	var labor_text: String = _format_team_count(int(project.get("labor_teams", 0)))
+	if project_type == "survey_expedition" or project_type == "establish_mine":
+		labor_text = "field crew"
 	var remaining_hours: int = _get_project_remaining_hours(project)
 
 	if project_type == "survey_expedition":
@@ -1193,7 +1203,8 @@ func _disband_selected_idle_field_crew() -> void:
 
 	var entity_id: String = StrategicMap.selected_entity_id
 	StrategicMap.remove_entity(entity_id)
-	EventBus.add_event("Field crew disbanded. Prototype note: no population or labor totals changed.")
+	GameState.release_field_crew_labor()
+	EventBus.add_event("Field crew disbanded. 1 labor team returned to the unassigned pool.")
 	_refresh_all_ui()
 
 

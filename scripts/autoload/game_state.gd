@@ -5,12 +5,14 @@ signal state_changed
 const ScenarioData: GDScript = preload("res://scripts/scenario_data.gd")
 const MINE_ORE_PER_HOUR: float = 0.5
 const MINE_SUPPLY_COST_PER_HOUR: float = 0.5
+const FIELD_CREW_LABOR_COST: int = 1
 
 var hearthmere: Dictionary = {}
 var prospects: Dictionary = {}
 var regions: Dictionary = {}
 var region_order: Array[String] = []
 var supply_production_labor_teams: int = 0
+var field_crew_labor_teams: int = 0
 
 func _ready() -> void:
 	hearthmere = ScenarioData.get_hearthmere_starting_values()
@@ -108,6 +110,21 @@ func remove_mine_worker(prospect_id: String) -> void:
 func set_supply_labor(teams: int) -> void:
 	supply_production_labor_teams = teams
 	emit_signal("state_changed")
+
+
+func reserve_field_crew_labor() -> void:
+	field_crew_labor_teams += FIELD_CREW_LABOR_COST
+	emit_signal("state_changed")
+
+
+func release_field_crew_labor() -> void:
+	field_crew_labor_teams = max(0, field_crew_labor_teams - FIELD_CREW_LABOR_COST)
+	emit_signal("state_changed")
+
+
+func get_field_crew_labor_teams() -> int:
+	return field_crew_labor_teams
+
 
 func get_total_labor_teams() -> int:
 	var available_workforce := int(hearthmere["available_workforce"])

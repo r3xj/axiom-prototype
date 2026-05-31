@@ -33,6 +33,7 @@ func get_shipment_labor_teams() -> int:
 func _get_unassigned_labor_teams() -> int:
 	var assigned: int = (GameState.supply_production_labor_teams
 		+ ProjectSystem.get_project_labor_teams()
+		+ GameState.get_field_crew_labor_teams()
 		+ get_shipment_labor_teams()
 		+ GameState.get_mine_worker_teams())
 	return max(0, GameState.get_total_labor_teams() - assigned)

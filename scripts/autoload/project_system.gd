@@ -22,9 +22,18 @@ func get_project_labor_teams() -> int:
 		total += int(project["labor_teams"])
 	return total
 
+
+func has_available_field_crew_for_site(prospect_id: String) -> bool:
+	if not StrategicMap.pois.has(prospect_id):
+		return false
+	var target_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
+	return not _find_available_field_crew_for_site(prospect_id, target_position).is_empty()
+
+
 func _get_unassigned_labor_teams() -> int:
 	var assigned: int = (GameState.supply_production_labor_teams
 		+ get_project_labor_teams()
+		+ GameState.get_field_crew_labor_teams()
 		+ LogisticsSystem.get_shipment_labor_teams()
 		+ GameState.get_mine_worker_teams())
 	return max(0, GameState.get_total_labor_teams() - assigned)
@@ -33,8 +42,8 @@ func start_survey_project(prospect_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):
 		return
 
-	if _get_unassigned_labor_teams() <= 0:
-		EventBus.add_event("No unassigned labor team is available for survey work.")
+	if _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST:
+		EventBus.add_event("No unassigned labor team is available to form a field crew.")
 		emit_signal("state_changed")
 		return
 
@@ -50,11 +59,13 @@ func start_survey_project(prospect_id: String) -> void:
 	var entity_id: String = "field_crew_survey_%s_%d" % [prospect_id, SimClock.game_hour]
 	var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
 	var destination_position: Vector2 = StrategicMap.get_poi_world_position(prospect_id)
+	GameState.reserve_field_crew_labor()
 	StrategicMap.create_entity(entity_id, "Field Crew: %s Survey" % str(prospect["name"]), "field_crew", source_position)
 	var path_assigned: bool = StrategicMap.command_entity_to_world_position(entity_id, destination_position)
 	var path_debug: Dictionary = StrategicMap.get_path_debug_summary(entity_id, destination_position)
 	if not path_assigned:
 		StrategicMap.remove_entity(entity_id)
+		GameState.release_field_crew_labor()
 		EventBus.add_event("Cannot survey %s: no valid expedition path (%s)." % [
 			str(prospect["name"]),
 			str(path_debug.get("reason", "unknown")),
@@ -81,7 +92,7 @@ func start_survey_project(prospect_id: String) -> void:
 		"title": "Field Crew Survey: %s" % prospect["name"],
 		"remaining_hours": estimated_hours,
 		"total_hours": estimated_hours,
-		"labor_teams": 1,
+		"labor_teams": 0,
 		"uses_strategic_entity": true,
 	}
 	active_projects.append(project)
@@ -106,11 +117,6 @@ func start_establish_mine_project(prospect_id: String) -> void:
 	if prospect["outcome"] != "redglass_deposit":
 		return
 
-	if _get_unassigned_labor_teams() < 2:
-		EventBus.add_event("Not enough labor available to establish a mine.")
-		emit_signal("state_changed")
-		return
-
 	if not StrategicMap.pois.has(prospect_id):
 		EventBus.add_event("Cannot establish mine at %s: no strategic map destination found." % str(prospect["name"]))
 		emit_signal("state_changed")
@@ -129,8 +135,13 @@ func start_establish_mine_project(prospect_id: String) -> void:
 		StrategicMap.set_entity_display_name(entity_id, "Field Crew: %s Mine" % str(prospect["name"]))
 		EventBus.add_event("[DEBUG] Reusing idle field crew for mine work: %s." % str(prospect["name"]))
 	else:
+		if _get_unassigned_labor_teams() < GameState.FIELD_CREW_LABOR_COST:
+			EventBus.add_event("No unassigned labor team is available to form a field crew.")
+			emit_signal("state_changed")
+			return
 		entity_id = "field_crew_mine_%s_%d" % [prospect_id, SimClock.game_hour]
 		var source_position: Vector2 = StrategicMap.get_poi_world_position("hearthmere")
+		GameState.reserve_field_crew_labor()
 		StrategicMap.create_entity(entity_id, "Field Crew: %s Mine" % str(prospect["name"]), "field_crew", source_position)
 
 	StrategicMap.set_entity_metadata(entity_id, {
@@ -153,6 +164,7 @@ func start_establish_mine_project(prospect_id: String) -> void:
 				StrategicMap.set_entity_metadata(entity_id, previous_entity_metadata)
 			else:
 				StrategicMap.remove_entity(entity_id)
+				GameState.release_field_crew_labor()
 			EventBus.add_event("Cannot establish mine at %s: no valid field crew path (%s)." % [
 				str(prospect["name"]),
 				str(path_debug.get("reason", "unknown")),
@@ -182,7 +194,7 @@ func start_establish_mine_project(prospect_id: String) -> void:
 		"title": "Field Crew Mine: %s" % prospect["name"] if uses_strategic_entity else "Building Mine: %s" % str(prospect["name"]),
 		"remaining_hours": estimated_hours if uses_strategic_entity else ESTABLISH_MINE_HOURS,
 		"total_hours": estimated_hours if uses_strategic_entity else ESTABLISH_MINE_HOURS,
-		"labor_teams": 2,
+		"labor_teams": 0,
 		"hourly_supply_cost": 1.0,
 		"supply_source": "hearthmere",
 		"last_stall_log_hour": -999,
@@ -286,6 +298,7 @@ func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> vo
 func _start_on_site_survey_work(project_index: int, project: Dictionary, prospect_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):
 		StrategicMap.remove_entity(str(project.get("entity_id", "")))
+		GameState.release_field_crew_labor()
 		active_projects.remove_at(project_index)
 		EventBus.add_event("Survey expedition arrived, but prospect no longer exists: %s." % prospect_id)
 		return
@@ -308,6 +321,7 @@ func _start_on_site_survey_work(project_index: int, project: Dictionary, prospec
 func _start_on_site_mine_work(project_index: int, project: Dictionary, prospect_id: String) -> void:
 	if not GameState.prospects.has(prospect_id):
 		StrategicMap.remove_entity(str(project.get("entity_id", "")))
+		GameState.release_field_crew_labor()
 		active_projects.remove_at(project_index)
 		EventBus.add_event("Field crew arrived for mine work, but prospect no longer exists: %s." % prospect_id)
 		return
