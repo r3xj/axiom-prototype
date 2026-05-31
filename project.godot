@@ -24,13 +24,12 @@ GameState="*res://scripts/autoload/game_state.gd"
 CodexSystem="*res://scripts/autoload/codex_system.gd"
 ProjectSystem="*res://scripts/autoload/project_system.gd"
 LogisticsSystem="*res://scripts/autoload/logistics_system.gd"
+StrategicMap="*res://scripts/autoload/strategic_map.gd"
 
-[application]
+[display]
 
-config/name="Axiom Prototype"
-run/main_scene="uid://bnp8y0rft31qi"
-config/features=PackedStringArray("4.6", "GL Compatibility")
-config/icon="res://icon.svg"
+window/size/viewport_width=1600
+window/size/viewport_height=900
 
 [physics]
 
