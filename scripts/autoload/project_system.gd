@@ -290,6 +290,7 @@ func force_complete_top_project() -> void:
 	emit_signal("state_changed")
 
 func _advance_projects_for_one_hour() -> void:
+	var completed_any_project: bool = false
 	for i in range(active_projects.size() - 1, -1, -1):
 		var project: Dictionary = active_projects[i]
 		if bool(project.get("uses_strategic_entity", false)):
@@ -318,6 +319,10 @@ func _advance_projects_for_one_hour() -> void:
 		if int(project["remaining_hours"]) <= 0:
 			active_projects.remove_at(i)
 			_complete_project(project)
+			completed_any_project = true
+
+	if completed_any_project:
+		emit_signal("state_changed")
 
 func _complete_project(project: Dictionary) -> void:
 	var project_type: String = str(project["type"])

@@ -204,6 +204,7 @@ func _advance_shipments_for_one_hour() -> void:
 		if int(shipment["progress_hours"]) >= int(shipment["total_hours"]):
 			active_shipments.remove_at(i)
 			_complete_shipment(shipment)
+			emit_signal("state_changed")
 
 
 func _on_strategic_entity_arrived(entity_id: String, metadata: Dictionary) -> void:

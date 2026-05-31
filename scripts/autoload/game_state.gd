@@ -28,10 +28,13 @@ func _on_hour_advanced(_hour: int) -> void:
 func _produce_supplies_for_one_hour() -> void:
 	if supply_production_labor_teams <= 0:
 		return
+	var previous_supplies: float = StockpileSystem.get_good_amount(hearthmere["stockpile"], "supplies")
 	var daily_output := supply_production_labor_teams * float(hearthmere["supply_production_per_team_per_day"])
 	var hourly_output := daily_output / float(SimClock.HOURS_PER_DAY)
-	var current := StockpileSystem.get_good_amount(hearthmere["stockpile"], "supplies")
-	StockpileSystem.set_good_amount(hearthmere["stockpile"], "supplies", current + hourly_output)
+	StockpileSystem.set_good_amount(hearthmere["stockpile"], "supplies", previous_supplies + hourly_output)
+	var current_supplies: float = StockpileSystem.get_good_amount(hearthmere["stockpile"], "supplies")
+	if previous_supplies < LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT and current_supplies >= LogisticsSystem.SHIPMENT_SUPPLY_AMOUNT:
+		emit_signal("state_changed")
 
 func _produce_ore_for_one_hour() -> void:
 	for prospect_id in prospects.keys():
@@ -46,6 +49,7 @@ func _produce_ore_for_one_hour() -> void:
 		var supplies: float = StockpileSystem.get_good_amount(stockpile, "supplies")
 		var ore_amount: float = StockpileSystem.get_good_amount(stockpile, produces)
 		var ore_cap: float = StockpileSystem.get_good_cap(stockpile, produces)
+		var ore_was_shippable: bool = ore_amount >= LogisticsSystem.SHIPMENT_ORE_AMOUNT
 
 		var new_status: String
 		if workers == 0:
@@ -64,6 +68,8 @@ func _produce_ore_for_one_hour() -> void:
 			prospect["mine_production_status"] = new_status
 			prospects[prospect_id] = prospect
 			EventBus.add_event(_format_production_status_change(str(prospect["name"]), new_status))
+			emit_signal("state_changed")
+		elif not ore_was_shippable and StockpileSystem.get_good_amount(stockpile, produces) >= LogisticsSystem.SHIPMENT_ORE_AMOUNT:
 			emit_signal("state_changed")
 
 
