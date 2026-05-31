@@ -512,6 +512,7 @@ func _refresh_dynamic_ui() -> void:
 	_refresh_time_label()
 	_refresh_global_status_bar()
 	_refresh_economy_panel()
+	_refresh_prospects_text()
 	_refresh_projects_panel()
 	_refresh_shipments_panel()
 	_refresh_event_log_panel()
@@ -525,7 +526,7 @@ func _refresh_dynamic_ui() -> void:
 func _refresh_interactive_ui() -> void:
 	_refresh_region_panel()
 	_refresh_region_buttons()
-	_refresh_prospects_panel()
+	_refresh_prospect_action_buttons()
 	_refresh_selected_entity_actions()
 	_refresh_field_crews_panel()
 
@@ -665,14 +666,21 @@ func _refresh_region_buttons() -> void:
 
 
 func _refresh_prospects_panel() -> void:
-	_clear_container_children(prospect_buttons_box)
+	_refresh_prospects_text()
+	_refresh_prospect_action_buttons()
 
+
+func _get_matching_prospect_ids_for_selected_region() -> Array[String]:
 	var matching_prospect_ids: Array[String] = []
 	for prospect_id in GameState.prospects.keys():
 		var prospect: Dictionary = GameState.prospects[prospect_id]
 		if prospect["region_id"] == selected_region_id:
 			matching_prospect_ids.append(prospect_id)
+	return matching_prospect_ids
 
+
+func _refresh_prospects_text() -> void:
+	var matching_prospect_ids: Array[String] = _get_matching_prospect_ids_for_selected_region()
 	if matching_prospect_ids.is_empty():
 		prospects_body.text = "No known prospect sites in this selected region."
 		return
@@ -706,6 +714,19 @@ func _refresh_prospects_panel() -> void:
 
 		text += "\n"
 
+	prospects_body.text = text.strip_edges()
+
+
+func _refresh_prospect_action_buttons() -> void:
+	_clear_container_children(prospect_buttons_box)
+
+	var matching_prospect_ids: Array[String] = _get_matching_prospect_ids_for_selected_region()
+	if matching_prospect_ids.is_empty():
+		return
+
+	for prospect_id in matching_prospect_ids:
+		var prospect: Dictionary = GameState.prospects[prospect_id]
+		var status: String = str(prospect["status"])
 		if status == "unsurveyed":
 			var selected_field_crew_id: String = _get_selected_idle_field_crew_id()
 			if (
@@ -801,8 +822,6 @@ func _refresh_prospects_panel() -> void:
 				btn_remove_worker.disabled = workers <= 0
 				btn_remove_worker.pressed.connect(_remove_mine_worker.bind(prospect_id))
 				prospect_buttons_box.add_child(btn_remove_worker)
-
-	prospects_body.text = text.strip_edges()
 
 
 func _refresh_economy_panel() -> void:
