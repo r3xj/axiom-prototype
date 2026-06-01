@@ -59,10 +59,13 @@ var pois: Dictionary = {}
 var entities: Dictionary = {}
 var selected_entity_id: String = "debug_caravan"
 var last_hover_world_position: Vector2 = Vector2(-1.0, -1.0)
+var map_validation_warnings: Array[String] = []
+var map_validation_ran: bool = false
 
 
 func _ready() -> void:
 	_build_map()
+	run_map_validation()
 	_create_debug_entities()
 	SimClock.simulation_time_advanced.connect(update_entities)
 
@@ -92,6 +95,121 @@ func _build_map() -> void:
 	_apply_terrain_patches()
 	_apply_roads()
 	_apply_blocked_cells()
+
+
+func run_map_validation() -> Array[String]:
+	map_validation_warnings = validate_map_data()
+	map_validation_ran = true
+	if map_validation_warnings.is_empty():
+		EventBus.add_event("[DEBUG] Strategic map validation passed.")
+	else:
+		EventBus.add_event("[DEBUG] Strategic map validation found %d warning(s)." % map_validation_warnings.size())
+		for warning in map_validation_warnings:
+			EventBus.add_event("[DEBUG] Map data warning: %s" % warning)
+	return map_validation_warnings
+
+
+func get_map_validation_summary() -> String:
+	if not map_validation_ran:
+		return "Map Data: validation not run"
+	if map_validation_warnings.is_empty():
+		return "Map Data: OK"
+	return "Map Data: %d warning(s)" % map_validation_warnings.size()
+
+
+func validate_map_data() -> Array[String]:
+	var warnings: Array[String] = []
+	_validate_region_data(warnings)
+	_validate_prospect_data(warnings)
+	_validate_poi_data(warnings)
+	_validate_shipment_locations(warnings)
+	return warnings
+
+
+func _validate_region_data(warnings: Array[String]) -> void:
+	for region_id in GameState.region_order:
+		if not GameState.regions.has(region_id):
+			warnings.append("Region order references unknown region '%s'." % region_id)
+
+	for region_key in GameState.regions.keys():
+		var region_id: String = str(region_key)
+		if not GameState.region_order.has(region_id):
+			warnings.append("Region '%s' is not listed in region_order." % region_id)
+		if not pois.has(region_id):
+			warnings.append("Region '%s' has no matching strategic POI." % region_id)
+
+
+func _validate_prospect_data(warnings: Array[String]) -> void:
+	for prospect_key in GameState.prospects.keys():
+		var prospect_id: String = str(prospect_key)
+		var prospect: Dictionary = GameState.prospects[prospect_id]
+		var region_id: String = str(prospect.get("region_id", ""))
+		if region_id.is_empty():
+			warnings.append("Prospect '%s' has no region_id." % prospect_id)
+		elif not GameState.regions.has(region_id):
+			warnings.append("Prospect '%s' references unknown region '%s'." % [prospect_id, region_id])
+
+		if not pois.has(prospect_id):
+			warnings.append("Prospect '%s' has no matching strategic POI for field crew targeting." % prospect_id)
+			continue
+
+		var poi: Dictionary = pois[prospect_id]
+		if str(poi.get("region_id", "")) != region_id:
+			warnings.append("Prospect '%s' region_id does not match its strategic POI region_id." % prospect_id)
+		if not _poi_has_valid_world_position(prospect_id, poi):
+			warnings.append("Prospect '%s' POI has missing or invalid world_position." % prospect_id)
+
+
+func _validate_poi_data(warnings: Array[String]) -> void:
+	for poi_key in pois.keys():
+		var poi_id: String = str(poi_key)
+		var poi: Dictionary = pois[poi_id]
+		if str(poi.get("id", poi_id)) != poi_id:
+			warnings.append("Strategic POI '%s' has mismatched id field." % poi_id)
+		if str(poi.get("display_name", "")).is_empty():
+			warnings.append("Strategic POI '%s' has no display_name." % poi_id)
+		if str(poi.get("poi_type", "")).is_empty():
+			warnings.append("Strategic POI '%s' has no poi_type." % poi_id)
+		if not _poi_has_valid_world_position(poi_id, poi):
+			warnings.append("Strategic POI '%s' has missing or invalid world_position." % poi_id)
+
+		var region_id: String = str(poi.get("region_id", ""))
+		if not region_id.is_empty() and not GameState.regions.has(region_id):
+			warnings.append("Strategic POI '%s' references unknown region '%s'." % [poi_id, region_id])
+
+
+func _validate_shipment_locations(warnings: Array[String]) -> void:
+	var shipment_locations: Array[String] = ["hearthmere"]
+	for prospect_key in GameState.prospects.keys():
+		shipment_locations.append(str(prospect_key))
+
+	for location_id in shipment_locations:
+		if not _can_resolve_location_world_position(location_id):
+			warnings.append("Shipment location '%s' cannot resolve to a strategic world position." % location_id)
+
+
+func _poi_has_valid_world_position(_poi_id: String, poi: Dictionary) -> bool:
+	if not poi.has("world_position"):
+		return false
+	if typeof(poi["world_position"]) != TYPE_VECTOR2:
+		return false
+	var world_position: Vector2 = poi["world_position"] as Vector2
+	return (
+		world_position.x >= 0.0
+		and world_position.y >= 0.0
+		and world_position.x <= world_size.x
+		and world_position.y <= world_size.y
+	)
+
+
+func _can_resolve_location_world_position(location_id: String) -> bool:
+	if pois.has(location_id):
+		return _poi_has_valid_world_position(location_id, pois[location_id])
+	if GameState.prospects.has(location_id):
+		var prospect: Dictionary = GameState.prospects[location_id]
+		var region_id: String = str(prospect.get("region_id", ""))
+		return pois.has(region_id) and _poi_has_valid_world_position(region_id, pois[region_id])
+	return false
 
 
 func _create_default_cells() -> void:

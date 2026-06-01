@@ -1427,7 +1427,7 @@ func _refresh_map_debug_panel() -> void:
 			path_points.size(),
 		]
 
-	map_debug_body.text = selected_text + "\n" + _format_hover_inspector()
+	map_debug_body.text = selected_text + StrategicMap.get_map_validation_summary() + "\n\n" + _format_hover_inspector()
 
 
 func _refresh_selected_entity_panel() -> void:
