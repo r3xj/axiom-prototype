@@ -115,3 +115,7 @@ Known validation for this stable checkpoint:
 - Eventually improve UI architecture and panel ownership.
 - Later, add region danger/security/raiders only after the Phase 1B foundation remains stable.
 - Do not add combat or AI as part of documentation or stabilization work.
+
+## Map Data Validation
+
+`StrategicMap` now includes prototype map-data validation for regions, prospects, POIs, world positions, and shipment-relevant locations. Validation runs at startup and reports a compact status in the debug/map inspector. This is intended to catch manually coordinated data issues as Phase 1B grows.
